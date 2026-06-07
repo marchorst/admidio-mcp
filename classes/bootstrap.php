@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 $autoloadCandidates = [
-    __DIR__ . '/../../../system/bootstrap/bootstrap.php',
     __DIR__ . '/../../../system/common.php',
+    __DIR__ . '/../../../system/bootstrap/bootstrap.php',
     __DIR__ . '/../../../adm_program/system/bootstrap/bootstrap.php',
     __DIR__ . '/../../../adm_program/system/common.php',
 ];
