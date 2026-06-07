@@ -38,6 +38,7 @@ final class AdmidioGateway
                 'first_name' => self::readObjectValue($user, ['getValue'], ['FIRST_NAME', 'first_name']),
                 'last_name' => self::readObjectValue($user, ['getValue'], ['LAST_NAME', 'last_name']),
                 'email' => self::readObjectValue($user, ['getValue'], ['EMAIL', 'email']),
+                'rights' => self::currentUserRights($user),
             ],
         ];
     }
@@ -191,8 +192,8 @@ final class AdmidioGateway
         }
 
         try {
+            self::assertCanCreateUsers();
             $user = self::newAdmidioUser();
-            $user->saveChangesWithoutRights();
             $user->setValue('usr_login_name', $loginName);
             $user->setValue('usr_valid', 1);
             self::applyProfileFields($user, $arguments['profile'] ?? []);
@@ -245,7 +246,6 @@ final class AdmidioGateway
 
         try {
             $user = self::newAdmidioUser($userId);
-            $user->saveChangesWithoutRights();
 
             if (isset($arguments['login_name'])) {
                 $user->setValue('usr_login_name', trim((string) $arguments['login_name']));
@@ -330,6 +330,7 @@ final class AdmidioGateway
             foreach ($roleIds as $roleId) {
                 $roleClass = self::roleClass();
                 $role = new $roleClass($db, $roleId);
+                self::assertCanAssignRole($role);
                 $role->stopMembership($userId);
                 $removed[] = $roleId;
             }
@@ -477,6 +478,13 @@ final class AdmidioGateway
             ];
         }
 
+        if (!is_object($GLOBALS['gCurrentUser'] ?? null) || (int) ($GLOBALS['gCurrentUserId'] ?? 0) <= 0) {
+            return [
+                'ok' => false,
+                'error' => 'No authenticated Admidio user is available for this request.',
+            ];
+        }
+
         return null;
     }
 
@@ -544,6 +552,7 @@ final class AdmidioGateway
         foreach ($resolvedRoleIds as $roleId) {
             $roleClass = self::roleClass();
             $role = new $roleClass($db, $roleId);
+            self::assertCanAssignRole($role);
             $role->setMembership($userId, $startDate, $endDate, $leader);
             $assigned[] = [
                 'role_id' => $roleId,
@@ -628,6 +637,61 @@ final class AdmidioGateway
             'last_name' => self::readObjectValue($user, ['getValue'], ['LAST_NAME']),
             'email' => self::readObjectValue($user, ['getValue'], ['EMAIL']),
         ];
+    }
+
+    private static function currentUserRights(object $user): array
+    {
+        return [
+            'administrator' => self::callBool($user, 'isAdministrator'),
+            'manage_users' => self::callBool($user, 'isAdministratorUsers'),
+            'manage_roles' => self::callBool($user, 'isAdministratorRoles'),
+            'approve_users' => self::callBool($user, 'isAdministratorRegistration'),
+        ];
+    }
+
+    private static function callBool(object $object, string $method): bool
+    {
+        if (!method_exists($object, $method)) {
+            return false;
+        }
+
+        try {
+            return (bool) $object->{$method}();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private static function currentAdmidioUser(): object
+    {
+        $user = $GLOBALS['gCurrentUser'] ?? null;
+
+        if (!is_object($user)) {
+            throw new \RuntimeException('No authenticated Admidio user is available for this request.');
+        }
+
+        return $user;
+    }
+
+    private static function assertCanCreateUsers(): void
+    {
+        $currentUser = self::currentAdmidioUser();
+
+        if (
+            !self::callBool($currentUser, 'isAdministratorUsers')
+            && !self::callBool($currentUser, 'isAdministratorRegistration')
+        ) {
+            throw new \RuntimeException('The authenticated Admidio user is not allowed to create users.');
+        }
+    }
+
+    private static function assertCanAssignRole(object $role): void
+    {
+        $currentUser = self::currentAdmidioUser();
+
+        if (!method_exists($role, 'allowedToAssignMembers') || !$role->allowedToAssignMembers($currentUser)) {
+            throw new \RuntimeException('The authenticated Admidio user is not allowed to assign members to this role.');
+        }
     }
 
     private static function ensureUserClass(): void

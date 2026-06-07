@@ -7,7 +7,7 @@ require_once __DIR__ . '/../classes/bootstrap.php';
 use AdmidioMcp\Config;
 use AdmidioMcp\McpServer;
 
-$server = new McpServer(new Config(true, true, 'codex', '', 'change-me', 20, [], dirname(__DIR__)));
+$server = new McpServer(new Config(true, true, 'admidio', 'codex', '', 'change-me', 20, [], dirname(__DIR__)));
 
 $initialize = $server->handle([
     'jsonrpc' => '2.0',

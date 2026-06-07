@@ -9,6 +9,7 @@ final class Config
     public function __construct(
         public readonly bool $enabled,
         public readonly bool $mutationsEnabled,
+        public readonly string $authProvider,
         public readonly string $username,
         public readonly string $passwordHash,
         public readonly string $password,
@@ -23,6 +24,7 @@ final class Config
         $config = [
             'enabled' => true,
             'mutations_enabled' => false,
+            'auth_provider' => 'admidio',
             'username' => 'codex',
             'password_hash' => '',
             'password' => '',
@@ -44,6 +46,7 @@ final class Config
         return new self(
             (bool) $config['enabled'],
             (bool) $config['mutations_enabled'],
+            (string) $config['auth_provider'],
             (string) $config['username'],
             (string) $config['password_hash'],
             (string) $config['password'],

@@ -9,7 +9,7 @@ Admidio data.
 This repository is a fresh starting point. The plugin provides:
 
 - HTTP endpoint `mcp.php`
-- Basic Auth with username and password
+- Basic Auth with Admidio username and password by default
 - MCP methods `initialize`, `tools/list`, `tools/call`, `ping`
 - Read-only tools:
   - `admidio_health`
@@ -26,7 +26,7 @@ This repository is a fresh starting point. The plugin provides:
 
 1. Copy this directory as `admidio-mcp` into `adm_plugins/`.
 2. Copy `config.sample.php` to `config.php`.
-3. Set the username and password in `config.php`.
+3. Keep `auth_provider` set to `admidio` to validate Basic Auth credentials against Admidio users.
 4. To create or update users, set `mutations_enabled` to `true` in `config.php`.
 5. Optionally set `allowed_role_ids` to restrict role assignments.
 6. Open the Admidio Plugin Manager and install the plugin.
@@ -47,7 +47,7 @@ streamable HTTP MCP servers. For Basic Auth, set the `Authorization` header via
 an environment variable.
 
 ```bash
-export ADMIDIO_MCP_AUTH="Basic $(printf 'codex:change-me' | base64)"
+export ADMIDIO_MCP_AUTH="Basic $(printf 'admidio-user:admidio-password' | base64)"
 ```
 
 `~/.codex/config.toml` or project-scoped `.codex/config.toml`:
@@ -63,10 +63,26 @@ enabled = true
 
 Restart Codex and use `/mcp` to verify that the server is reachable.
 
+If the Admidio account uses TOTP, pass the current code with an additional
+header:
+
+```toml
+[mcp_servers.admidio]
+url = "https://example.org/admidio/adm_plugins/admidio-mcp/mcp.php"
+env_http_headers = { Authorization = "ADMIDIO_MCP_AUTH", X-Admidio-Totp = "ADMIDIO_MCP_TOTP" }
+enabled = true
+```
+
 ## Mutation Tools
 
 Profile fields are set with Admidio internal field names. Common fields are
 `FIRST_NAME`, `LAST_NAME`, and `EMAIL`.
+
+Mutating tools run as the authenticated Admidio user:
+
+- `admidio_create_user` requires user-management or registration administration rights.
+- `admidio_update_user` uses Admidio profile edit permissions.
+- `admidio_assign_user_roles` and `admidio_remove_user_roles` use Admidio role assignment permissions, including role leader rules.
 
 Example arguments for `admidio_create_user`:
 
@@ -98,7 +114,8 @@ Example arguments for `admidio_assign_user_roles`:
 ## Security
 
 - Run this endpoint only over HTTPS, otherwise Basic Auth credentials are sent in clear text.
-- Prefer `password_hash()` in `config.php`.
+- The default `auth_provider = "admidio"` does not use plugin-local passwords.
+- If `auth_provider = "static"` is used, prefer `password_hash()` in `config.php`.
 - Mutating operations are disabled by default and must be explicitly enabled in `config.php`.
 - User and role changes use Admidio entity classes so Admidio validation and changelog logic can apply.
 - `admidio_search_users` limits result counts and returns only minimal fields.

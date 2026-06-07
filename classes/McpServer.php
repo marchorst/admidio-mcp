@@ -53,7 +53,7 @@ final class McpServer
                 'name' => 'admidio-mcp',
                 'version' => '0.1.0',
             ],
-            'instructions' => 'Admidio MCP server. Read tools inspect health, current user context, users, and roles. Mutating tools can create/update users and assign/remove roles only when mutations_enabled is true in plugin config.',
+            'instructions' => 'Admidio MCP server. Basic Auth is validated against Admidio users by default, and mutating tools run with that user context. Mutations require mutations_enabled=true and Admidio permissions.',
         ];
     }
 

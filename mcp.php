@@ -15,7 +15,7 @@ if (!$config->enabled) {
     JsonRpcResponse::sendHttpError(503, 'MCP server is disabled.');
 }
 
-if (!Auth::checkBasicAuth($config)) {
+if (!Auth::authenticateBasicAuth($config)) {
     header('WWW-Authenticate: Basic realm="Admidio MCP", charset="UTF-8"');
     JsonRpcResponse::sendHttpError(401, 'Authentication required.');
 }

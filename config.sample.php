@@ -11,12 +11,15 @@ declare(strict_types=1);
 $plgMcpConfig = [
     'enabled' => true,
     'mutations_enabled' => false,
+
+    // "admidio" validates Basic Auth credentials against Admidio users and
+    // executes tools with that user's Admidio permissions.
+    // "static" keeps the legacy plugin-local username/password check below.
+    'auth_provider' => 'admidio',
+
+    // Used only when auth_provider is "static".
     'username' => 'codex',
-
-    // Preferred: password_hash('your-password', PASSWORD_DEFAULT)
     'password_hash' => '',
-
-    // Fallback for local testing only. Leave empty in production.
     'password' => 'change-me',
 
     'max_search_results' => 20,
