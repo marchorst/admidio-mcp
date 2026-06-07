@@ -53,7 +53,7 @@ final class McpServer
                 'name' => 'admidio-mcp',
                 'version' => '0.1.0',
             ],
-            'instructions' => 'Read-only Admidio MCP server. Use tools to inspect health, current Admidio user context, and search users. Do not assume write access; this server intentionally exposes no mutating tools.',
+            'instructions' => 'Admidio MCP server. Read tools inspect health, current user context, users, and roles. Mutating tools can create/update users and assign/remove roles only when mutations_enabled is true in plugin config.',
         ];
     }
 
@@ -98,6 +98,115 @@ final class McpServer
                     'additionalProperties' => false,
                 ],
             ],
+            [
+                'name' => 'admidio_list_roles',
+                'description' => 'List active Admidio roles/groups that can be assigned to users.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'query' => [
+                            'type' => 'string',
+                            'description' => 'Optional role/group name filter.',
+                        ],
+                        'limit' => [
+                            'type' => 'integer',
+                            'minimum' => 1,
+                            'maximum' => $this->config->maxSearchResults,
+                        ],
+                    ],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
+                'name' => 'admidio_create_user',
+                'description' => 'Create an Admidio user, set profile fields, and optionally assign roles/groups.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'login_name' => ['type' => 'string'],
+                        'password' => ['type' => 'string'],
+                        'profile' => [
+                            'type' => 'object',
+                            'description' => 'Profile fields keyed by Admidio internal field names, e.g. FIRST_NAME, LAST_NAME, EMAIL.',
+                            'additionalProperties' => true,
+                        ],
+                        'role_ids' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'integer'],
+                        ],
+                        'role_names' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'string'],
+                        ],
+                        'membership_start' => ['type' => 'string'],
+                        'membership_end' => ['type' => 'string'],
+                    ],
+                    'required' => ['login_name', 'profile'],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
+                'name' => 'admidio_update_user',
+                'description' => 'Update an Admidio user login, password, active state, and profile fields.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'user_id' => ['type' => 'integer'],
+                        'login_name' => ['type' => 'string'],
+                        'password' => ['type' => 'string'],
+                        'valid' => ['type' => 'boolean'],
+                        'profile' => [
+                            'type' => 'object',
+                            'additionalProperties' => true,
+                        ],
+                    ],
+                    'required' => ['user_id'],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
+                'name' => 'admidio_assign_user_roles',
+                'description' => 'Assign one or more Admidio roles/groups to an existing user.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'user_id' => ['type' => 'integer'],
+                        'role_ids' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'integer'],
+                        ],
+                        'role_names' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'string'],
+                        ],
+                        'start_date' => ['type' => 'string'],
+                        'end_date' => ['type' => 'string'],
+                        'leader' => ['type' => 'boolean'],
+                    ],
+                    'required' => ['user_id'],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
+                'name' => 'admidio_remove_user_roles',
+                'description' => 'Stop current Admidio role/group memberships for an existing user.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'user_id' => ['type' => 'integer'],
+                        'role_ids' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'integer'],
+                        ],
+                        'role_names' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'string'],
+                        ],
+                    ],
+                    'required' => ['user_id'],
+                    'additionalProperties' => false,
+                ],
+            ],
         ];
     }
 
@@ -119,6 +228,16 @@ final class McpServer
                 isset($arguments['limit']) ? (int) $arguments['limit'] : $this->config->maxSearchResults,
                 $this->config->maxSearchResults
             )),
+            'admidio_list_roles' => $this->toolResult(AdmidioGateway::listRoles(
+                (string) ($arguments['query'] ?? ''),
+                isset($arguments['limit']) ? (int) $arguments['limit'] : $this->config->maxSearchResults,
+                $this->config->maxSearchResults,
+                $this->config->allowedRoleIds
+            )),
+            'admidio_create_user' => $this->toolResult(AdmidioGateway::createUser($arguments, $this->config)),
+            'admidio_update_user' => $this->toolResult(AdmidioGateway::updateUser($arguments, $this->config)),
+            'admidio_assign_user_roles' => $this->toolResult(AdmidioGateway::assignUserRoles($arguments, $this->config)),
+            'admidio_remove_user_roles' => $this->toolResult(AdmidioGateway::removeUserRoles($arguments, $this->config)),
             default => $this->toolError('Unknown tool: ' . $params['name']),
         };
     }
@@ -132,7 +251,7 @@ final class McpServer
                     'text' => json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
                 ],
             ],
-            'isError' => false,
+            'isError' => isset($data['error']) || ($data['ok'] ?? true) === false,
         ];
     }
 

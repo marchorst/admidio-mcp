@@ -10,6 +10,7 @@ declare(strict_types=1);
  */
 $plgMcpConfig = [
     'enabled' => true,
+    'mutations_enabled' => false,
     'username' => 'codex',
 
     // Preferred: password_hash('your-password', PASSWORD_DEFAULT)
@@ -19,4 +20,7 @@ $plgMcpConfig = [
     'password' => 'change-me',
 
     'max_search_results' => 20,
+
+    // Optional allow-list. Empty means all roles may be assigned/removed.
+    'allowed_role_ids' => [],
 ];

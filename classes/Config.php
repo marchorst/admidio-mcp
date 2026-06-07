@@ -8,10 +8,12 @@ final class Config
 {
     public function __construct(
         public readonly bool $enabled,
+        public readonly bool $mutationsEnabled,
         public readonly string $username,
         public readonly string $passwordHash,
         public readonly string $password,
         public readonly int $maxSearchResults,
+        public readonly array $allowedRoleIds,
         public readonly string $pluginDir
     ) {
     }
@@ -20,10 +22,12 @@ final class Config
     {
         $config = [
             'enabled' => true,
+            'mutations_enabled' => false,
             'username' => 'codex',
             'password_hash' => '',
             'password' => '',
             'max_search_results' => 20,
+            'allowed_role_ids' => [],
         ];
 
         $configFile = $pluginDir . '/config.php';
@@ -39,10 +43,12 @@ final class Config
 
         return new self(
             (bool) $config['enabled'],
+            (bool) $config['mutations_enabled'],
             (string) $config['username'],
             (string) $config['password_hash'],
             (string) $config['password'],
             max(1, min(100, (int) $config['max_search_results'])),
+            array_values(array_filter(array_map('intval', (array) $config['allowed_role_ids']))),
             $pluginDir
         );
     }

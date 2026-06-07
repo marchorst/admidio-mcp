@@ -117,6 +117,235 @@ final class AdmidioGateway
         ];
     }
 
+    public static function listRoles(string $query, int $limit, int $maxLimit, array $allowedRoleIds = []): array
+    {
+        $db = $GLOBALS['gDb'] ?? null;
+
+        if (!is_object($db)) {
+            return [
+                'roles' => [],
+                'error' => 'Admidio database object is not available.',
+            ];
+        }
+
+        $limit = max(1, min($limit, $maxLimit));
+        $tablePrefix = defined('TBL_ROLES') ? '' : self::detectTablePrefix();
+        $rolesTable = defined('TBL_ROLES') ? TBL_ROLES : $tablePrefix . 'roles';
+        $categoriesTable = defined('TBL_CATEGORIES') ? TBL_CATEGORIES : $tablePrefix . 'categories';
+        $where = ['rol.rol_valid = 1'];
+        $params = [];
+
+        if ($query !== '') {
+            $where[] = 'rol.rol_name LIKE ?';
+            $params[] = '%' . $query . '%';
+        }
+
+        if ($allowedRoleIds !== []) {
+            $where[] = 'rol.rol_id IN (' . implode(', ', array_fill(0, count($allowedRoleIds), '?')) . ')';
+            array_push($params, ...$allowedRoleIds);
+        }
+
+        $sql = '
+            SELECT rol.rol_id, rol.rol_uuid, rol.rol_name, rol.rol_description, rol.rol_administrator,
+                   cat.cat_id, cat.cat_name
+              FROM ' . $rolesTable . ' rol
+         LEFT JOIN ' . $categoriesTable . ' cat
+                ON cat.cat_id = rol.rol_cat_id
+             WHERE ' . implode(' AND ', $where) . '
+          ORDER BY cat.cat_sequence ASC, rol.rol_name ASC';
+
+        try {
+            $rows = self::queryRowsPrepared($db, $sql, $params, $limit);
+        } catch (Throwable $exception) {
+            return [
+                'roles' => [],
+                'error' => $exception->getMessage(),
+            ];
+        }
+
+        return [
+            'roles' => array_map(static fn (array $row): array => [
+                'id' => isset($row['rol_id']) ? (int) $row['rol_id'] : null,
+                'uuid' => $row['rol_uuid'] ?? null,
+                'name' => $row['rol_name'] ?? null,
+                'description' => $row['rol_description'] ?? null,
+                'administrator' => isset($row['rol_administrator']) ? (bool) $row['rol_administrator'] : false,
+                'category' => [
+                    'id' => isset($row['cat_id']) ? (int) $row['cat_id'] : null,
+                    'name' => $row['cat_name'] ?? null,
+                ],
+            ], $rows),
+        ];
+    }
+
+    public static function createUser(array $arguments, Config $config): array
+    {
+        if ($error = self::mutationPreflight($config)) {
+            return $error;
+        }
+
+        $loginName = trim((string) ($arguments['login_name'] ?? ''));
+
+        if ($loginName === '') {
+            return ['created' => false, 'error' => 'login_name is required.'];
+        }
+
+        try {
+            $user = self::newAdmidioUser();
+            $user->saveChangesWithoutRights();
+            $user->setValue('usr_login_name', $loginName);
+            $user->setValue('usr_valid', 1);
+            self::applyProfileFields($user, $arguments['profile'] ?? []);
+            $user->save();
+
+            if (isset($arguments['password']) && (string) $arguments['password'] !== '') {
+                $user->setPassword((string) $arguments['password']);
+                $user->save();
+            }
+
+            $userId = (int) $user->getValue('usr_id');
+            $roleResult = [];
+
+            if (self::hasRoleInput($arguments)) {
+                $roleResult = self::assignRolesToUser(
+                    $userId,
+                    $arguments['role_ids'] ?? [],
+                    $arguments['role_names'] ?? [],
+                    (string) ($arguments['membership_start'] ?? self::today()),
+                    (string) ($arguments['membership_end'] ?? self::dateMax()),
+                    null,
+                    $config
+                );
+            }
+
+            return [
+                'created' => true,
+                'user' => self::userSummary($user),
+                'roles' => $roleResult,
+            ];
+        } catch (Throwable $exception) {
+            return [
+                'created' => false,
+                'error' => $exception->getMessage(),
+            ];
+        }
+    }
+
+    public static function updateUser(array $arguments, Config $config): array
+    {
+        if ($error = self::mutationPreflight($config)) {
+            return $error;
+        }
+
+        $userId = (int) ($arguments['user_id'] ?? 0);
+
+        if ($userId <= 0) {
+            return ['updated' => false, 'error' => 'user_id must be a positive integer.'];
+        }
+
+        try {
+            $user = self::newAdmidioUser($userId);
+            $user->saveChangesWithoutRights();
+
+            if (isset($arguments['login_name'])) {
+                $user->setValue('usr_login_name', trim((string) $arguments['login_name']));
+            }
+
+            if (array_key_exists('valid', $arguments)) {
+                $user->setValue('usr_valid', (bool) $arguments['valid'] ? 1 : 0);
+            }
+
+            self::applyProfileFields($user, $arguments['profile'] ?? []);
+
+            if (isset($arguments['password']) && (string) $arguments['password'] !== '') {
+                $user->setPassword((string) $arguments['password']);
+            }
+
+            $user->save();
+
+            return [
+                'updated' => true,
+                'user' => self::userSummary($user),
+            ];
+        } catch (Throwable $exception) {
+            return [
+                'updated' => false,
+                'error' => $exception->getMessage(),
+            ];
+        }
+    }
+
+    public static function assignUserRoles(array $arguments, Config $config): array
+    {
+        if ($error = self::mutationPreflight($config)) {
+            return $error;
+        }
+
+        $userId = (int) ($arguments['user_id'] ?? 0);
+
+        if ($userId <= 0) {
+            return ['assigned' => false, 'error' => 'user_id must be a positive integer.'];
+        }
+
+        try {
+            return [
+                'assigned' => true,
+                'roles' => self::assignRolesToUser(
+                    $userId,
+                    $arguments['role_ids'] ?? [],
+                    $arguments['role_names'] ?? [],
+                    (string) ($arguments['start_date'] ?? self::today()),
+                    (string) ($arguments['end_date'] ?? self::dateMax()),
+                    array_key_exists('leader', $arguments) ? (bool) $arguments['leader'] : null,
+                    $config
+                ),
+            ];
+        } catch (Throwable $exception) {
+            return [
+                'assigned' => false,
+                'error' => $exception->getMessage(),
+            ];
+        }
+    }
+
+    public static function removeUserRoles(array $arguments, Config $config): array
+    {
+        if ($error = self::mutationPreflight($config)) {
+            return $error;
+        }
+
+        $userId = (int) ($arguments['user_id'] ?? 0);
+
+        if ($userId <= 0) {
+            return ['removed' => false, 'error' => 'user_id must be a positive integer.'];
+        }
+
+        try {
+            self::ensureRoleClass();
+            self::ensureSessionStub();
+            $db = self::admidioDb();
+            $roleIds = self::resolveRoleIds($arguments['role_ids'] ?? [], $arguments['role_names'] ?? [], $config);
+            $removed = [];
+
+            foreach ($roleIds as $roleId) {
+                $roleClass = self::roleClass();
+                $role = new $roleClass($db, $roleId);
+                $role->stopMembership($userId);
+                $removed[] = $roleId;
+            }
+
+            return [
+                'removed' => true,
+                'role_ids' => $removed,
+            ];
+        } catch (Throwable $exception) {
+            return [
+                'removed' => false,
+                'error' => $exception->getMessage(),
+            ];
+        }
+    }
+
     private static function readObjectValue(object $object, array $methods, array $keys): mixed
     {
         foreach ($methods as $method) {
@@ -173,6 +402,18 @@ final class AdmidioGateway
         throw new \RuntimeException('Unsupported Admidio database object.');
     }
 
+    private static function queryRowsPrepared(object $db, string $sql, array $params, int $limit): array
+    {
+        $sqlWithLimit = $sql . ' LIMIT ' . $limit;
+
+        if (method_exists($db, 'queryPrepared')) {
+            $statement = $db->queryPrepared($sqlWithLimit, $params);
+            return self::fetchRows($statement, $limit);
+        }
+
+        throw new \RuntimeException('Prepared queries are not supported by the Admidio database object.');
+    }
+
     private static function fetchRows(mixed $statement, int $limit): array
     {
         $rows = [];
@@ -211,5 +452,233 @@ final class AdmidioGateway
         }
 
         return 'adm_';
+    }
+
+    private static function mutationPreflight(Config $config): ?array
+    {
+        if (!$config->mutationsEnabled) {
+            return [
+                'ok' => false,
+                'error' => 'Mutating MCP tools are disabled. Set mutations_enabled to true in config.php.',
+            ];
+        }
+
+        if (!is_object($GLOBALS['gDb'] ?? null)) {
+            return [
+                'ok' => false,
+                'error' => 'Admidio database object is not available.',
+            ];
+        }
+
+        if (!class_exists(self::userClass()) || !class_exists(self::roleClass())) {
+            return [
+                'ok' => false,
+                'error' => 'Admidio User and Role entity classes are not available.',
+            ];
+        }
+
+        return null;
+    }
+
+    private static function admidioDb(): object
+    {
+        $db = $GLOBALS['gDb'] ?? null;
+
+        if (!is_object($db)) {
+            throw new \RuntimeException('Admidio database object is not available.');
+        }
+
+        return $db;
+    }
+
+    private static function newAdmidioUser(int $userId = 0): object
+    {
+        self::ensureUserClass();
+        $userClass = self::userClass();
+
+        return new $userClass(self::admidioDb(), $GLOBALS['gProfileFields'] ?? null, $userId);
+    }
+
+    private static function applyProfileFields(object $user, mixed $profile): void
+    {
+        if (!is_array($profile)) {
+            return;
+        }
+
+        foreach ($profile as $fieldName => $value) {
+            if (!is_string($fieldName) || str_starts_with($fieldName, 'usr_')) {
+                continue;
+            }
+
+            if (!is_scalar($value) && !is_array($value) && $value !== null) {
+                continue;
+            }
+
+            $user->setValue($fieldName, $value ?? '');
+        }
+    }
+
+    private static function assignRolesToUser(
+        int $userId,
+        mixed $roleIds,
+        mixed $roleNames,
+        string $startDate,
+        string $endDate,
+        ?bool $leader,
+        Config $config
+    ): array {
+        self::ensureRoleClass();
+        self::ensureSessionStub();
+        $db = self::admidioDb();
+        $resolvedRoleIds = self::resolveRoleIds($roleIds, $roleNames, $config);
+
+        if ($resolvedRoleIds === []) {
+            return [];
+        }
+
+        self::assertDate($startDate, 'start_date');
+        self::assertDate($endDate, 'end_date');
+
+        $assigned = [];
+
+        foreach ($resolvedRoleIds as $roleId) {
+            $roleClass = self::roleClass();
+            $role = new $roleClass($db, $roleId);
+            $role->setMembership($userId, $startDate, $endDate, $leader);
+            $assigned[] = [
+                'role_id' => $roleId,
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'leader' => $leader,
+            ];
+        }
+
+        return $assigned;
+    }
+
+    private static function resolveRoleIds(mixed $roleIds, mixed $roleNames, Config $config): array
+    {
+        $ids = [];
+
+        foreach ((array) $roleIds as $roleId) {
+            $roleId = (int) $roleId;
+
+            if ($roleId > 0) {
+                $ids[] = $roleId;
+            }
+        }
+
+        foreach ((array) $roleNames as $roleName) {
+            $roleName = trim((string) $roleName);
+
+            if ($roleName === '') {
+                continue;
+            }
+
+            $ids[] = self::roleIdByName($roleName);
+        }
+
+        $ids = array_values(array_unique($ids));
+
+        if ($ids === []) {
+            throw new \InvalidArgumentException('At least one role_id or role_name is required.');
+        }
+
+        if ($config->allowedRoleIds !== []) {
+            $blocked = array_values(array_diff($ids, $config->allowedRoleIds));
+
+            if ($blocked !== []) {
+                throw new \InvalidArgumentException('Role assignment is not allowed for role IDs: ' . implode(', ', $blocked));
+            }
+        }
+
+        return $ids;
+    }
+
+    private static function hasRoleInput(array $arguments): bool
+    {
+        return !empty($arguments['role_ids']) || !empty($arguments['role_names']);
+    }
+
+    private static function roleIdByName(string $roleName): int
+    {
+        $tablePrefix = defined('TBL_ROLES') ? '' : self::detectTablePrefix();
+        $rolesTable = defined('TBL_ROLES') ? TBL_ROLES : $tablePrefix . 'roles';
+        $sql = 'SELECT rol_id FROM ' . $rolesTable . ' WHERE rol_name = ? AND rol_valid = 1';
+        $rows = self::queryRowsPrepared(self::admidioDb(), $sql, [$roleName], 2);
+
+        if (count($rows) === 0) {
+            throw new \InvalidArgumentException('Role not found: ' . $roleName);
+        }
+
+        if (count($rows) > 1) {
+            throw new \InvalidArgumentException('Role name is ambiguous: ' . $roleName);
+        }
+
+        return (int) $rows[0]['rol_id'];
+    }
+
+    private static function userSummary(object $user): array
+    {
+        return [
+            'id' => (int) $user->getValue('usr_id'),
+            'login_name' => $user->getValue('usr_login_name'),
+            'valid' => (bool) $user->getValue('usr_valid'),
+            'first_name' => self::readObjectValue($user, ['getValue'], ['FIRST_NAME']),
+            'last_name' => self::readObjectValue($user, ['getValue'], ['LAST_NAME']),
+            'email' => self::readObjectValue($user, ['getValue'], ['EMAIL']),
+        ];
+    }
+
+    private static function ensureUserClass(): void
+    {
+        if (!class_exists(self::userClass())) {
+            throw new \RuntimeException('Admidio User entity class is not available.');
+        }
+    }
+
+    private static function ensureRoleClass(): void
+    {
+        if (!class_exists(self::roleClass())) {
+            throw new \RuntimeException('Admidio Role entity class is not available.');
+        }
+    }
+
+    private static function userClass(): string
+    {
+        return 'Admidio\\Users\\Entity\\User';
+    }
+
+    private static function roleClass(): string
+    {
+        return 'Admidio\\Roles\\Entity\\Role';
+    }
+
+    private static function ensureSessionStub(): void
+    {
+        if (!is_object($GLOBALS['gCurrentSession'] ?? null)) {
+            $GLOBALS['gCurrentSession'] = new class {
+                public function reload(int $userId): void
+                {
+                }
+            };
+        }
+    }
+
+    private static function today(): string
+    {
+        return defined('DATE_NOW') ? DATE_NOW : date('Y-m-d');
+    }
+
+    private static function dateMax(): string
+    {
+        return defined('DATE_MAX') ? DATE_MAX : '9999-12-31';
+    }
+
+    private static function assertDate(string $date, string $field): void
+    {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            throw new \InvalidArgumentException($field . ' must use YYYY-MM-DD format.');
+        }
     }
 }

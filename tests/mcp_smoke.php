@@ -7,7 +7,7 @@ require_once __DIR__ . '/../classes/bootstrap.php';
 use AdmidioMcp\Config;
 use AdmidioMcp\McpServer;
 
-$server = new McpServer(new Config(true, 'codex', '', 'change-me', 20, dirname(__DIR__)));
+$server = new McpServer(new Config(true, true, 'codex', '', 'change-me', 20, [], dirname(__DIR__)));
 
 $initialize = $server->handle([
     'jsonrpc' => '2.0',
@@ -34,7 +34,7 @@ if (!is_array($initialize) || !isset($initialize['result']['serverInfo']['name']
     exit(1);
 }
 
-if (!is_array($tools) || count($tools['result']['tools'] ?? []) !== 3) {
+if (!is_array($tools) || count($tools['result']['tools'] ?? []) !== 8) {
     fwrite(STDERR, "tools/list failed\n");
     exit(1);
 }
