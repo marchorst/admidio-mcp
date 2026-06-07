@@ -1,0 +1,6 @@
+[mcp_servers.admidio]
+url = "https://example.org/admidio/adm_plugins/admidio-mcp/mcp.php"
+env_http_headers = { Authorization = "ADMIDIO_MCP_AUTH" }
+startup_timeout_sec = 10
+tool_timeout_sec = 30
+enabled = true

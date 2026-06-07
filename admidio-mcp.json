@@ -1,0 +1,26 @@
+{
+  "name": "Admidio MCP",
+  "description": "Read-only MCP server endpoint for Codex integration.",
+  "version": "0.1.0",
+  "author": "Local project",
+  "url": "https://www.admidio.org",
+  "icon": "bi-braces-asterisk",
+  "mainFile": "index.php",
+  "overviewPlugin": false,
+  "autoload": {
+    "psr-4": {
+      "AdmidioMcp\\": "classes/"
+    }
+  },
+  "dependencies": [
+    "Admidio\\Infrastructure\\Plugins\\PluginAbstract"
+  ],
+  "defaultConfig": {
+    "admidio_mcp_enabled": {
+      "name": "MCP server enabled",
+      "description": "Enables the MCP endpoint for authenticated clients.",
+      "type": "boolean",
+      "value": true
+    }
+  }
+}
