@@ -1,36 +1,36 @@
 # Admidio MCP Plugin
 
-Ein Admidio-5-Plugin, das einen einfachen MCP-Server per HTTP bereitstellt.
-Codex kann den Server als Streamable-HTTP-MCP-Server einbinden und ueber Tools
-read-only auf Admidio-Kontext zugreifen.
+An Admidio 5 plugin that exposes a small HTTP MCP server. Codex can connect to
+the endpoint as a streamable HTTP MCP server and use tools to interact with
+Admidio data.
 
 ## Status
 
-Dieses Repository ist ein frischer Startpunkt. Das Plugin liefert:
+This repository is a fresh starting point. The plugin provides:
 
-- HTTP-Endpunkt `mcp.php`
-- Basic-Auth per Username und Passwort
-- MCP-Methoden `initialize`, `tools/list`, `tools/call`, `ping`
-- Read-only Tools:
+- HTTP endpoint `mcp.php`
+- Basic Auth with username and password
+- MCP methods `initialize`, `tools/list`, `tools/call`, `ping`
+- Read-only tools:
   - `admidio_health`
   - `admidio_current_user`
   - `admidio_search_users`
   - `admidio_list_roles`
-- Schreibende Tools, nur wenn `mutations_enabled = true` in `config.php`:
+- Mutating tools, only when `mutations_enabled = true` in `config.php`:
   - `admidio_create_user`
   - `admidio_update_user`
   - `admidio_assign_user_roles`
   - `admidio_remove_user_roles`
 
-## Installation in Admidio
+## Admidio Installation
 
-1. Dieses Verzeichnis als `admidio-mcp` nach `adm_plugins/` kopieren.
-2. `config.sample.php` nach `config.php` kopieren.
-3. Username und Passwort in `config.php` setzen.
-4. Fuer Benutzeranlage/-aenderung in `config.php` `mutations_enabled` auf `true` setzen.
-5. Optional `allowed_role_ids` setzen, um Gruppenzuordnungen auf bestimmte Rollen zu begrenzen.
-6. In Admidio den Plugin Manager oeffnen und das Plugin installieren.
-7. Den MCP-Endpunkt testen:
+1. Copy this directory as `admidio-mcp` into `adm_plugins/`.
+2. Copy `config.sample.php` to `config.php`.
+3. Set the username and password in `config.php`.
+4. To create or update users, set `mutations_enabled` to `true` in `config.php`.
+5. Optionally set `allowed_role_ids` to restrict role assignments.
+6. Open the Admidio Plugin Manager and install the plugin.
+7. Test the MCP endpoint:
 
 ```bash
 curl -u codex:change-me \
@@ -40,17 +40,17 @@ curl -u codex:change-me \
   https://example.org/admidio/adm_plugins/admidio-mcp/mcp.php
 ```
 
-## Codex-Konfiguration
+## Codex Configuration
 
-Codex unterstuetzt fuer Streamable-HTTP-MCP-Server statische oder aus der
-Umgebung geladene HTTP-Header. Fuer Basic Auth wird der Header als
-Umgebungsvariable gesetzt.
+Codex supports static HTTP headers and environment-backed HTTP headers for
+streamable HTTP MCP servers. For Basic Auth, set the `Authorization` header via
+an environment variable.
 
 ```bash
 export ADMIDIO_MCP_AUTH="Basic $(printf 'codex:change-me' | base64)"
 ```
 
-`~/.codex/config.toml` oder projektbezogen `.codex/config.toml`:
+`~/.codex/config.toml` or project-scoped `.codex/config.toml`:
 
 ```toml
 [mcp_servers.admidio]
@@ -61,14 +61,14 @@ tool_timeout_sec = 30
 enabled = true
 ```
 
-Danach Codex neu starten und mit `/mcp` pruefen, ob der Server erreichbar ist.
+Restart Codex and use `/mcp` to verify that the server is reachable.
 
-## Schreibwerkzeuge
+## Mutation Tools
 
-Profilfelder werden mit Admidios internen Feldnamen gesetzt. Typische Felder
-sind `FIRST_NAME`, `LAST_NAME` und `EMAIL`.
+Profile fields are set with Admidio internal field names. Common fields are
+`FIRST_NAME`, `LAST_NAME`, and `EMAIL`.
 
-Beispielargumente fuer `admidio_create_user`:
+Example arguments for `admidio_create_user`:
 
 ```json
 {
@@ -79,11 +79,11 @@ Beispielargumente fuer `admidio_create_user`:
     "LAST_NAME": "Mustermann",
     "EMAIL": "max@example.org"
   },
-  "role_names": ["Mitglieder"]
+  "role_names": ["Members"]
 }
 ```
 
-Beispielargumente fuer `admidio_assign_user_roles`:
+Example arguments for `admidio_assign_user_roles`:
 
 ```json
 {
@@ -95,23 +95,23 @@ Beispielargumente fuer `admidio_assign_user_roles`:
 }
 ```
 
-## Sicherheit
+## Security
 
-- Nur ueber HTTPS betreiben, da Basic Auth sonst im Klartext uebertragen wird.
-- In `config.php` bevorzugt `password_hash()` verwenden.
-- Schreiboperationen sind standardmaessig deaktiviert und muessen in `config.php` explizit aktiviert werden.
-- Benutzer- und Rollen-Aenderungen verwenden Admidios Entity-Klassen, damit Admidio-seitige Validierung und Changelog-Logik greifen.
-- `admidio_search_users` begrenzt Ergebnisse und gibt nur minimale Felder aus.
+- Run this endpoint only over HTTPS, otherwise Basic Auth credentials are sent in clear text.
+- Prefer `password_hash()` in `config.php`.
+- Mutating operations are disabled by default and must be explicitly enabled in `config.php`.
+- User and role changes use Admidio entity classes so Admidio validation and changelog logic can apply.
+- `admidio_search_users` limits result counts and returns only minimal fields.
 
-## Entwicklung
+## Development
 
-Syntaxcheck:
+Syntax check:
 
 ```bash
 find . -name '*.php' -print0 | xargs -0 -n1 php -l
 ```
 
-Smoke-Test ohne Admidio-Installation:
+Smoke test without an Admidio installation:
 
 ```bash
 ADMIDIO_MCP_TEST=1 php tests/mcp_smoke.php
