@@ -136,6 +136,32 @@ final class McpServer
                             'type' => 'boolean',
                             'description' => 'Include inactive/invalid users. Defaults to false.',
                         ],
+                        'role_id' => [
+                            'type' => 'integer',
+                            'description' => 'Only return users with a current membership in this Admidio role/group.',
+                        ],
+                        'role_ids' => [
+                            'type' => 'array',
+                            'description' => 'Only return users with a current membership in one of these Admidio roles/groups.',
+                            'items' => ['type' => 'integer'],
+                        ],
+                        'role_name' => [
+                            'type' => 'string',
+                            'description' => 'Only return users with a current membership in this Admidio role/group name.',
+                        ],
+                        'role_names' => [
+                            'type' => 'array',
+                            'description' => 'Only return users with a current membership in one of these Admidio role/group names.',
+                            'items' => ['type' => 'string'],
+                        ],
+                        'include_former_members' => [
+                            'type' => 'boolean',
+                            'description' => 'Include former or future memberships for the selected roles. Defaults to false.',
+                        ],
+                        'membership_active_on' => [
+                            'type' => 'string',
+                            'description' => 'Date used for current membership filtering in YYYY-MM-DD format. Defaults to today.',
+                        ],
                         'fields' => [
                             'description' => 'Optional Admidio profile field names to return, e.g. FIRST_NAME, LAST_NAME, EMAIL. Use "*" or "all" if allow_all_user_fields is enabled.',
                             'oneOf' => [
@@ -290,7 +316,11 @@ final class McpServer
                 $this->config->maxSearchResults,
                 isset($arguments['offset']) ? (int) $arguments['offset'] : 0,
                 isset($arguments['include_inactive']) && (bool) $arguments['include_inactive'],
-                $this->userFields($arguments)
+                $this->userFields($arguments),
+                $this->roleIds($arguments),
+                $this->roleNames($arguments),
+                isset($arguments['include_former_members']) && (bool) $arguments['include_former_members'],
+                (string) ($arguments['membership_active_on'] ?? '')
             )),
             'admidio_list_roles' => $this->toolResult(AdmidioGateway::listRoles(
                 (string) ($arguments['query'] ?? ''),
@@ -370,5 +400,39 @@ final class McpServer
         $alias = trim($alias, '_');
 
         return $alias !== '' ? $alias : 'field';
+    }
+
+    private function roleIds(array $arguments): array
+    {
+        $roleIds = [];
+
+        if (isset($arguments['role_id'])) {
+            $roleIds[] = (int) $arguments['role_id'];
+        }
+
+        foreach ((array) ($arguments['role_ids'] ?? []) as $roleId) {
+            $roleIds[] = (int) $roleId;
+        }
+
+        return array_values(array_filter(array_unique($roleIds), static fn (int $roleId): bool => $roleId > 0));
+    }
+
+    private function roleNames(array $arguments): array
+    {
+        $roleNames = [];
+
+        if (isset($arguments['role_name'])) {
+            $roleNames[] = (string) $arguments['role_name'];
+        }
+
+        foreach ((array) ($arguments['role_names'] ?? []) as $roleName) {
+            $roleName = trim((string) $roleName);
+
+            if ($roleName !== '') {
+                $roleNames[] = $roleName;
+            }
+        }
+
+        return array_values(array_unique($roleNames));
     }
 }

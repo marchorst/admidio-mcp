@@ -149,6 +149,23 @@ If enabled in `config.php`, callers can request every profile field:
 }
 ```
 
+To list only members of a role/group, pass either `role_id`, `role_ids`,
+`role_name`, or `role_names`:
+
+```json
+{
+  "limit": 100,
+  "offset": 0,
+  "role_name": "Members",
+  "fields": "all"
+}
+```
+
+By default, role filters only include memberships active today. Set
+`membership_active_on` to another `YYYY-MM-DD` date, or set
+`include_former_members` to `true` to include former and future memberships for
+the selected role/group.
+
 Both tools return a `pagination` object with `limit`, `offset`, `count`,
 `has_more`, and `next_offset`.
 

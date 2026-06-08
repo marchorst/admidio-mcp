@@ -65,6 +65,11 @@ if (!isset($listUsersTool['inputSchema']['properties']['fields'])) {
     exit(1);
 }
 
+if (!isset($listUsersTool['inputSchema']['properties']['role_id'])) {
+    fwrite(STDERR, "admidio_list_users role_id schema missing\n");
+    exit(1);
+}
+
 $listUsers = $server->handle([
     'jsonrpc' => '2.0',
     'id' => 3,

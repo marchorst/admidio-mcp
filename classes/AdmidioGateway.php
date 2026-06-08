@@ -116,7 +116,11 @@ final class AdmidioGateway
         int $maxLimit,
         int $offset = 0,
         bool $includeInactive = false,
-        array $fields = []
+        array $fields = [],
+        array $roleIds = [],
+        array $roleNames = [],
+        bool $includeFormerMembers = false,
+        string $membershipActiveOn = ''
     ): array {
         $db = $GLOBALS['gDb'] ?? null;
 
@@ -133,8 +137,30 @@ final class AdmidioGateway
         $tablePrefix = self::detectTablePrefix();
         $usersTable = defined('TBL_USERS') ? TBL_USERS : $tablePrefix . 'users';
         $userDataTable = defined('TBL_USER_DATA') ? TBL_USER_DATA : $tablePrefix . 'user_data';
+        $membersTable = defined('TBL_MEMBERS') ? TBL_MEMBERS : $tablePrefix . 'members';
         [$profileSelects, $selectParams, $fieldAliases] = self::userProfileSelects($fields);
+        $resolvedRoleIds = self::resolveOptionalRoleIds($roleIds, $roleNames);
+        $join = '';
+        $joinParams = [];
         $where = $includeInactive ? ['1 = 1'] : ['usr.usr_valid = 1'];
+
+        if ($resolvedRoleIds !== []) {
+            $join = '
+            INNER JOIN ' . $membersTable . ' mem
+                ON mem.mem_usr_id = usr.usr_id
+               AND mem.mem_rol_id IN (' . implode(', ', array_fill(0, count($resolvedRoleIds), '?')) . ')';
+            array_push($joinParams, ...$resolvedRoleIds);
+
+            if (!$includeFormerMembers) {
+                $membershipActiveOn = $membershipActiveOn !== '' ? $membershipActiveOn : self::today();
+                self::assertDate($membershipActiveOn, 'membership_active_on');
+                $join .= '
+               AND mem.mem_begin <= ?
+               AND mem.mem_end >= ?';
+                $joinParams[] = $membershipActiveOn;
+                $joinParams[] = $membershipActiveOn;
+            }
+        }
 
         $sql = "
             SELECT DISTINCT
@@ -145,13 +171,14 @@ final class AdmidioGateway
             FROM {$usersTable} usr
             LEFT JOIN {$userDataTable} data
                 ON data.usd_usr_id = usr.usr_id
+            {$join}
             WHERE " . implode(' AND ', $where) . "
             GROUP BY usr.usr_id, usr.usr_login_name, usr.usr_valid
             ORDER BY usr.usr_id ASC
         ";
 
         try {
-            $rows = self::queryRowsPrepared($db, $sql, $selectParams, $fetchLimit, $offset);
+            $rows = self::queryRowsPrepared($db, $sql, array_merge($selectParams, $joinParams), $fetchLimit, $offset);
         } catch (Throwable $exception) {
             return [
                 'users' => [],
@@ -167,6 +194,9 @@ final class AdmidioGateway
             'pagination' => self::pagination($limit, $offset, count($rows), $hasMore),
             'include_inactive' => $includeInactive,
             'fields' => array_values($fieldAliases),
+            'role_ids' => $resolvedRoleIds,
+            'include_former_members' => $includeFormerMembers,
+            'membership_active_on' => $resolvedRoleIds !== [] && !$includeFormerMembers ? $membershipActiveOn : null,
         ];
     }
 
@@ -831,6 +861,29 @@ final class AdmidioGateway
         }
 
         return $ids;
+    }
+
+    private static function resolveOptionalRoleIds(array $roleIds, array $roleNames): array
+    {
+        $ids = [];
+
+        foreach ($roleIds as $roleId) {
+            $roleId = (int) $roleId;
+
+            if ($roleId > 0) {
+                $ids[] = $roleId;
+            }
+        }
+
+        foreach ($roleNames as $roleName) {
+            $roleName = trim((string) $roleName);
+
+            if ($roleName !== '') {
+                $ids[] = self::roleIdByName($roleName);
+            }
+        }
+
+        return array_values(array_unique($ids));
     }
 
     private static function hasRoleInput(array $arguments): bool
