@@ -99,9 +99,17 @@ final class McpServer
                             'description' => 'Number of matching users to skip for pagination.',
                         ],
                         'fields' => [
-                            'type' => 'array',
-                            'description' => 'Optional Admidio profile field names to return, e.g. FIRST_NAME, LAST_NAME, EMAIL.',
-                            'items' => ['type' => 'string'],
+                            'description' => 'Optional Admidio profile field names to return, e.g. FIRST_NAME, LAST_NAME, EMAIL. Use "*" or "all" if allow_all_user_fields is enabled.',
+                            'oneOf' => [
+                                [
+                                    'type' => 'array',
+                                    'items' => ['type' => 'string'],
+                                ],
+                                [
+                                    'type' => 'string',
+                                    'enum' => ['*', 'all'],
+                                ],
+                            ],
                         ],
                     ],
                     'required' => ['query'],
@@ -129,9 +137,17 @@ final class McpServer
                             'description' => 'Include inactive/invalid users. Defaults to false.',
                         ],
                         'fields' => [
-                            'type' => 'array',
-                            'description' => 'Optional Admidio profile field names to return, e.g. FIRST_NAME, LAST_NAME, EMAIL.',
-                            'items' => ['type' => 'string'],
+                            'description' => 'Optional Admidio profile field names to return, e.g. FIRST_NAME, LAST_NAME, EMAIL. Use "*" or "all" if allow_all_user_fields is enabled.',
+                            'oneOf' => [
+                                [
+                                    'type' => 'array',
+                                    'items' => ['type' => 'string'],
+                                ],
+                                [
+                                    'type' => 'string',
+                                    'enum' => ['*', 'all'],
+                                ],
+                            ],
                         ],
                     ],
                     'additionalProperties' => false,
@@ -318,7 +334,15 @@ final class McpServer
 
     private function userFields(array $arguments): array
     {
-        if (!isset($arguments['fields']) || !is_array($arguments['fields'])) {
+        if (!isset($arguments['fields'])) {
+            return $this->config->userFields;
+        }
+
+        if ($arguments['fields'] === '*' || $arguments['fields'] === 'all') {
+            return $this->config->allowAllUserFields ? ['*' => '*'] : $this->config->userFields;
+        }
+
+        if (!is_array($arguments['fields'])) {
             return $this->config->userFields;
         }
 
@@ -328,6 +352,10 @@ final class McpServer
             $fieldName = trim((string) $fieldName);
 
             if ($fieldName !== '') {
+                if ($fieldName === '*' || strtolower($fieldName) === 'all') {
+                    return $this->config->allowAllUserFields ? ['*' => '*'] : $this->config->userFields;
+                }
+
                 $fields[$fieldName] = $this->fieldAlias($fieldName);
             }
         }

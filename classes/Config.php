@@ -15,6 +15,7 @@ final class Config
         public readonly string $password,
         public readonly int $maxSearchResults,
         public readonly array $userFields,
+        public readonly bool $allowAllUserFields,
         public readonly array $allowedRoleIds,
         public readonly string $pluginDir
     ) {
@@ -31,6 +32,7 @@ final class Config
             'password' => '',
             'max_search_results' => 20,
             'user_fields' => ['FIRST_NAME', 'LAST_NAME', 'EMAIL'],
+            'allow_all_user_fields' => false,
             'allowed_role_ids' => [],
         ];
 
@@ -53,21 +55,30 @@ final class Config
             (string) $config['password_hash'],
             (string) $config['password'],
             max(1, min(100, (int) $config['max_search_results'])),
-            self::normalizeUserFields((array) $config['user_fields']),
+            self::normalizeUserFields($config['user_fields']),
+            (bool) $config['allow_all_user_fields'],
             array_values(array_filter(array_map('intval', (array) $config['allowed_role_ids']))),
             $pluginDir
         );
     }
 
-    private static function normalizeUserFields(array $fields): array
+    private static function normalizeUserFields(mixed $fields): array
     {
+        if ($fields === '*' || $fields === 'all') {
+            return ['*' => '*'];
+        }
+
         $normalized = [];
 
-        foreach ($fields as $alias => $fieldName) {
+        foreach ((array) $fields as $alias => $fieldName) {
             $fieldName = trim((string) $fieldName);
 
             if ($fieldName === '') {
                 continue;
+            }
+
+            if ($fieldName === '*' || strtolower($fieldName) === 'all') {
+                return ['*' => '*'];
             }
 
             $normalized[$fieldName] = is_string($alias) ? self::normalizeFieldAlias($alias) : self::defaultFieldAlias($fieldName);

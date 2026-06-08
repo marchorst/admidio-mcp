@@ -34,6 +34,10 @@ $plgMcpConfig = [
         // 'phone' => 'PHONE',
     ],
 
+    // Allow MCP calls to request all profile fields with fields="all" or fields=["*"].
+    // You can also set user_fields to "*" to return all profile fields by default.
+    'allow_all_user_fields' => false,
+
     // Optional allow-list. Empty means all roles may be assigned/removed.
     'allowed_role_ids' => [],
 ];

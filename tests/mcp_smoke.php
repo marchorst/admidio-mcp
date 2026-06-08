@@ -16,6 +16,7 @@ $server = new McpServer(new Config(
     'change-me',
     20,
     ['FIRST_NAME' => 'first_name', 'LAST_NAME' => 'last_name', 'EMAIL' => 'email'],
+    true,
     [],
     dirname(__DIR__)
 ));

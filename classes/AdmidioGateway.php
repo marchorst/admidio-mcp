@@ -482,6 +482,10 @@ final class AdmidioGateway
 
     private static function normalizeUserFields(array $fields): array
     {
+        if (isset($fields['*']) && $fields['*'] === '*') {
+            return self::allUserProfileFields();
+        }
+
         if ($fields === []) {
             return [
                 'FIRST_NAME' => 'first_name',
@@ -499,6 +503,10 @@ final class AdmidioGateway
                 continue;
             }
 
+            if ($fieldName === '*' || $fieldName === 'ALL') {
+                return self::allUserProfileFields();
+            }
+
             $normalized[$fieldName] = self::normalizeOutputAlias((string) $outputAlias, $fieldName);
         }
 
@@ -509,6 +517,70 @@ final class AdmidioGateway
         ];
     }
 
+    private static function allUserProfileFields(): array
+    {
+        $fields = [];
+        $profileFields = $GLOBALS['gProfileFields'] ?? null;
+
+        if (is_object($profileFields) && method_exists($profileFields, 'getProfileFields')) {
+            try {
+                foreach (array_keys($profileFields->getProfileFields()) as $fieldName) {
+                    $fieldName = strtoupper(trim((string) $fieldName));
+
+                    if ($fieldName !== '') {
+                        $fields[$fieldName] = self::uniqueOutputAlias(self::normalizeOutputAlias('', $fieldName), $fields);
+                    }
+                }
+            } catch (Throwable) {
+            }
+        }
+
+        if ($fields === []) {
+            $fields = self::allUserProfileFieldsFromDatabase();
+        }
+
+        return $fields !== [] ? $fields : [
+            'FIRST_NAME' => 'first_name',
+            'LAST_NAME' => 'last_name',
+            'EMAIL' => 'email',
+        ];
+    }
+
+    private static function allUserProfileFieldsFromDatabase(): array
+    {
+        $db = $GLOBALS['gDb'] ?? null;
+
+        if (!is_object($db)) {
+            return [];
+        }
+
+        $tablePrefix = defined('TBL_USER_FIELDS') ? '' : self::detectTablePrefix();
+        $userFieldsTable = defined('TBL_USER_FIELDS') ? TBL_USER_FIELDS : $tablePrefix . 'user_fields';
+        $sql = '
+            SELECT usf_name_intern
+              FROM ' . $userFieldsTable . '
+             WHERE usf_name_intern <> \'\'
+          ORDER BY usf_sequence ASC, usf_name_intern ASC';
+
+        try {
+            $rows = self::queryRowsPrepared($db, $sql, [], 1000);
+        } catch (Throwable) {
+            return [];
+        }
+
+        $fields = [];
+
+        foreach ($rows as $row) {
+            $fieldName = strtoupper(trim((string) ($row['usf_name_intern'] ?? '')));
+
+            if ($fieldName !== '') {
+                $fields[$fieldName] = self::uniqueOutputAlias(self::normalizeOutputAlias('', $fieldName), $fields);
+            }
+        }
+
+        return $fields;
+    }
+
     private static function normalizeOutputAlias(string $outputAlias, string $fieldName): string
     {
         $outputAlias = strtolower(trim($outputAlias));
@@ -517,6 +589,22 @@ final class AdmidioGateway
 
         return $outputAlias !== '' ? $outputAlias : strtolower($fieldName);
     }
+
+    private static function uniqueOutputAlias(string $outputAlias, array $fields): string
+    {
+        if (!in_array($outputAlias, $fields, true)) {
+            return $outputAlias;
+        }
+
+        $suffix = 2;
+
+        while (in_array($outputAlias . '_' . $suffix, $fields, true)) {
+            $suffix++;
+        }
+
+        return $outputAlias . '_' . $suffix;
+    }
+
 
     private static function mapUserRow(array $row, array $fieldAliases): array
     {

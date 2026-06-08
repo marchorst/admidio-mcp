@@ -139,6 +139,16 @@ Example arguments for `admidio_list_users`:
 }
 ```
 
+If enabled in `config.php`, callers can request every profile field:
+
+```json
+{
+  "limit": 100,
+  "offset": 0,
+  "fields": "all"
+}
+```
+
 Both tools return a `pagination` object with `limit`, `offset`, `count`,
 `has_more`, and `next_offset`.
 
@@ -152,6 +162,16 @@ $plgMcpConfig = [
         'EMAIL',
         'phone' => 'PHONE',
     ],
+    'allow_all_user_fields' => true,
+];
+```
+
+To return all profile fields by default, set:
+
+```php
+$plgMcpConfig = [
+    'user_fields' => '*',
+    'allow_all_user_fields' => true,
 ];
 ```
 
