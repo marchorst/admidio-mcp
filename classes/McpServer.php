@@ -215,10 +215,12 @@ final class McpServer
                             'type' => 'array',
                             'items' => ['type' => 'integer'],
                         ],
+                        'role_id' => ['type' => 'integer'],
                         'role_names' => [
                             'type' => 'array',
                             'items' => ['type' => 'string'],
                         ],
+                        'role_name' => ['type' => 'string'],
                         'membership_start' => ['type' => 'string'],
                         'membership_end' => ['type' => 'string'],
                     ],
@@ -247,7 +249,7 @@ final class McpServer
             ],
             [
                 'name' => 'admidio_assign_user_roles',
-                'description' => 'Assign one or more Admidio roles/groups to an existing user.',
+                'description' => 'Assign or update one or more Admidio role/group memberships for an existing user.',
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
@@ -256,13 +258,56 @@ final class McpServer
                             'type' => 'array',
                             'items' => ['type' => 'integer'],
                         ],
+                        'role_id' => ['type' => 'integer'],
                         'role_names' => [
                             'type' => 'array',
                             'items' => ['type' => 'string'],
                         ],
+                        'role_name' => ['type' => 'string'],
                         'start_date' => ['type' => 'string'],
                         'end_date' => ['type' => 'string'],
+                        'membership_start' => ['type' => 'string'],
+                        'membership_end' => ['type' => 'string'],
                         'leader' => ['type' => 'boolean'],
+                        'force_period' => ['type' => 'boolean'],
+                    ],
+                    'required' => ['user_id'],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
+                'name' => 'admidio_update_user_memberships',
+                'description' => 'Update Admidio role/group membership dates and leader state for an existing user.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'user_id' => ['type' => 'integer'],
+                        'role_ids' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'integer'],
+                        ],
+                        'role_id' => ['type' => 'integer'],
+                        'role_names' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'string'],
+                        ],
+                        'role_name' => ['type' => 'string'],
+                        'membership_start' => [
+                            'type' => 'string',
+                            'description' => 'Membership start date in YYYY-MM-DD format.',
+                        ],
+                        'membership_end' => [
+                            'type' => 'string',
+                            'description' => 'Membership end date in YYYY-MM-DD format.',
+                        ],
+                        'leader' => [
+                            'type' => 'boolean',
+                            'description' => 'Set whether the user is a leader in the selected roles/groups.',
+                        ],
+                        'force_period' => [
+                            'type' => 'boolean',
+                            'description' => 'Force shortening existing membership periods when needed. Defaults to true.',
+                        ],
                     ],
                     'required' => ['user_id'],
                     'additionalProperties' => false,
@@ -279,10 +324,12 @@ final class McpServer
                             'type' => 'array',
                             'items' => ['type' => 'integer'],
                         ],
+                        'role_id' => ['type' => 'integer'],
                         'role_names' => [
                             'type' => 'array',
                             'items' => ['type' => 'string'],
                         ],
+                        'role_name' => ['type' => 'string'],
                     ],
                     'required' => ['user_id'],
                     'additionalProperties' => false,
@@ -331,6 +378,7 @@ final class McpServer
             'admidio_create_user' => $this->toolResult(AdmidioGateway::createUser($arguments, $this->config)),
             'admidio_update_user' => $this->toolResult(AdmidioGateway::updateUser($arguments, $this->config)),
             'admidio_assign_user_roles' => $this->toolResult(AdmidioGateway::assignUserRoles($arguments, $this->config)),
+            'admidio_update_user_memberships' => $this->toolResult(AdmidioGateway::updateUserMemberships($arguments, $this->config)),
             'admidio_remove_user_roles' => $this->toolResult(AdmidioGateway::removeUserRoles($arguments, $this->config)),
             default => $this->toolError('Unknown tool: ' . $params['name']),
         };

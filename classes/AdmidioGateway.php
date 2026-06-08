@@ -292,8 +292,8 @@ final class AdmidioGateway
             if (self::hasRoleInput($arguments)) {
                 $roleResult = self::assignRolesToUser(
                     $userId,
-                    $arguments['role_ids'] ?? [],
-                    $arguments['role_names'] ?? [],
+                    self::argumentRoleIds($arguments),
+                    self::argumentRoleNames($arguments),
                     (string) ($arguments['membership_start'] ?? self::today()),
                     (string) ($arguments['membership_end'] ?? self::dateMax()),
                     null,
@@ -374,17 +374,52 @@ final class AdmidioGateway
                 'assigned' => true,
                 'roles' => self::assignRolesToUser(
                     $userId,
-                    $arguments['role_ids'] ?? [],
-                    $arguments['role_names'] ?? [],
-                    (string) ($arguments['start_date'] ?? self::today()),
-                    (string) ($arguments['end_date'] ?? self::dateMax()),
+                    self::argumentRoleIds($arguments),
+                    self::argumentRoleNames($arguments),
+                    (string) ($arguments['membership_start'] ?? $arguments['start_date'] ?? self::today()),
+                    (string) ($arguments['membership_end'] ?? $arguments['end_date'] ?? self::dateMax()),
                     array_key_exists('leader', $arguments) ? (bool) $arguments['leader'] : null,
-                    $config
+                    $config,
+                    isset($arguments['force_period']) && (bool) $arguments['force_period']
                 ),
             ];
         } catch (Throwable $exception) {
             return [
                 'assigned' => false,
+                'error' => $exception->getMessage(),
+            ];
+        }
+    }
+
+    public static function updateUserMemberships(array $arguments, Config $config): array
+    {
+        if ($error = self::mutationPreflight($config)) {
+            return $error;
+        }
+
+        $userId = (int) ($arguments['user_id'] ?? 0);
+
+        if ($userId <= 0) {
+            return ['updated' => false, 'error' => 'user_id must be a positive integer.'];
+        }
+
+        try {
+            return [
+                'updated' => true,
+                'roles' => self::assignRolesToUser(
+                    $userId,
+                    self::argumentRoleIds($arguments),
+                    self::argumentRoleNames($arguments),
+                    (string) ($arguments['membership_start'] ?? self::today()),
+                    (string) ($arguments['membership_end'] ?? self::dateMax()),
+                    array_key_exists('leader', $arguments) ? (bool) $arguments['leader'] : null,
+                    $config,
+                    array_key_exists('force_period', $arguments) ? (bool) $arguments['force_period'] : true
+                ),
+            ];
+        } catch (Throwable $exception) {
+            return [
+                'updated' => false,
                 'error' => $exception->getMessage(),
             ];
         }
@@ -406,7 +441,7 @@ final class AdmidioGateway
             self::ensureRoleClass();
             self::ensureSessionStub();
             $db = self::admidioDb();
-            $roleIds = self::resolveRoleIds($arguments['role_ids'] ?? [], $arguments['role_names'] ?? [], $config);
+            $roleIds = self::resolveRoleIds(self::argumentRoleIds($arguments), self::argumentRoleNames($arguments), $config);
             $removed = [];
 
             foreach ($roleIds as $roleId) {
@@ -792,7 +827,8 @@ final class AdmidioGateway
         string $startDate,
         string $endDate,
         ?bool $leader,
-        Config $config
+        Config $config,
+        bool $forcePeriod = false
     ): array {
         self::ensureRoleClass();
         self::ensureSessionStub();
@@ -812,12 +848,13 @@ final class AdmidioGateway
             $roleClass = self::roleClass();
             $role = new $roleClass($db, $roleId);
             self::assertCanAssignRole($role);
-            $role->setMembership($userId, $startDate, $endDate, $leader);
+            $role->setMembership($userId, $startDate, $endDate, $leader, $forcePeriod);
             $assigned[] = [
                 'role_id' => $roleId,
                 'start_date' => $startDate,
                 'end_date' => $endDate,
                 'leader' => $leader,
+                'force_period' => $forcePeriod,
             ];
         }
 
@@ -888,7 +925,44 @@ final class AdmidioGateway
 
     private static function hasRoleInput(array $arguments): bool
     {
-        return !empty($arguments['role_ids']) || !empty($arguments['role_names']);
+        return !empty($arguments['role_id'])
+            || !empty($arguments['role_ids'])
+            || !empty($arguments['role_name'])
+            || !empty($arguments['role_names']);
+    }
+
+    private static function argumentRoleIds(array $arguments): array
+    {
+        $roleIds = [];
+
+        if (isset($arguments['role_id'])) {
+            $roleIds[] = (int) $arguments['role_id'];
+        }
+
+        foreach ((array) ($arguments['role_ids'] ?? []) as $roleId) {
+            $roleId = (int) $roleId;
+
+            if ($roleId > 0) {
+                $roleIds[] = $roleId;
+            }
+        }
+
+        return array_values(array_unique(array_filter($roleIds, static fn (int $roleId): bool => $roleId > 0)));
+    }
+
+    private static function argumentRoleNames(array $arguments): array
+    {
+        $roleNames = [];
+
+        if (isset($arguments['role_name'])) {
+            $roleNames[] = trim((string) $arguments['role_name']);
+        }
+
+        foreach ((array) ($arguments['role_names'] ?? []) as $roleName) {
+            $roleNames[] = trim((string) $roleName);
+        }
+
+        return array_values(array_unique(array_filter($roleNames, static fn (string $roleName): bool => $roleName !== '')));
     }
 
     private static function roleIdByName(string $roleName): int

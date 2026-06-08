@@ -46,7 +46,7 @@ if (!is_array($initialize) || !isset($initialize['result']['serverInfo']['name']
     exit(1);
 }
 
-if (!is_array($tools) || count($tools['result']['tools'] ?? []) !== 9) {
+if (!is_array($tools) || count($tools['result']['tools'] ?? []) !== 10) {
     fwrite(STDERR, "tools/list failed\n");
     exit(1);
 }
@@ -55,6 +55,11 @@ $toolNames = array_column($tools['result']['tools'], 'name');
 
 if (!in_array('admidio_list_users', $toolNames, true)) {
     fwrite(STDERR, "admidio_list_users missing\n");
+    exit(1);
+}
+
+if (!in_array('admidio_update_user_memberships', $toolNames, true)) {
+    fwrite(STDERR, "admidio_update_user_memberships missing\n");
     exit(1);
 }
 

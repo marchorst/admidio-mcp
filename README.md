@@ -21,6 +21,7 @@ This repository is a fresh starting point. The plugin provides:
   - `admidio_create_user`
   - `admidio_update_user`
   - `admidio_assign_user_roles`
+  - `admidio_update_user_memberships`
   - `admidio_remove_user_roles`
 
 ## Admidio Installation
@@ -106,9 +107,22 @@ Example arguments for `admidio_assign_user_roles`:
 {
   "user_id": 123,
   "role_ids": [4, 7],
-  "start_date": "2026-06-07",
-  "end_date": "9999-12-31",
+  "membership_start": "2026-06-07",
+  "membership_end": "9999-12-31",
   "leader": false
+}
+```
+
+Example arguments for `admidio_update_user_memberships`:
+
+```json
+{
+  "user_id": 123,
+  "role_name": "Members",
+  "membership_start": "2026-01-01",
+  "membership_end": "2026-12-31",
+  "leader": false,
+  "force_period": true
 }
 ```
 
