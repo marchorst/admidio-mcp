@@ -47,13 +47,6 @@ final class AdmidioGateway
     {
         $query = trim($query);
 
-        if (mb_strlen($query) < 2) {
-            return [
-                'users' => [],
-                'error' => 'Query must contain at least two characters.',
-            ];
-        }
-
         $db = $GLOBALS['gDb'] ?? null;
 
         if (!is_object($db)) {
@@ -64,42 +57,48 @@ final class AdmidioGateway
         }
 
         $limit = max(1, min($limit, $maxLimit));
-        $tablePrefix = defined('TBL_USERS') ? '' : self::detectTablePrefix();
+        $tablePrefix = self::detectTablePrefix();
+        $usersTable = defined('TBL_USERS') ? TBL_USERS : $tablePrefix . 'users';
+        $userDataTable = defined('TBL_USER_DATA') ? TBL_USER_DATA : $tablePrefix . 'user_data';
+        $profileFieldIds = self::profileFieldIds(['FIRST_NAME', 'LAST_NAME', 'EMAIL']);
+        $selectParams = [];
+        $firstNameSelect = self::profileFieldSelect('first_name', $profileFieldIds['FIRST_NAME'] ?? null, $selectParams);
+        $lastNameSelect = self::profileFieldSelect('last_name', $profileFieldIds['LAST_NAME'] ?? null, $selectParams);
+        $emailSelect = self::profileFieldSelect('email', $profileFieldIds['EMAIL'] ?? null, $selectParams);
 
-        if (defined('TBL_USERS')) {
-            $usersTable = TBL_USERS;
-            $userDataTable = defined('TBL_USER_DATA') ? TBL_USER_DATA : $tablePrefix . 'user_data';
-            $profileFieldsTable = defined('TBL_PROFILE_FIELDS') ? TBL_PROFILE_FIELDS : $tablePrefix . 'profile_fields';
-        } else {
-            $usersTable = $tablePrefix . 'users';
-            $userDataTable = $tablePrefix . 'user_data';
-            $profileFieldsTable = $tablePrefix . 'profile_fields';
+        $where = ['usr.usr_valid = 1'];
+        $whereParams = [];
+
+        if ($query !== '') {
+            if (mb_strlen($query) < 2) {
+                return [
+                    'users' => [],
+                    'error' => 'Query must contain at least two characters.',
+                ];
+            }
+
+            $where[] = '(usr.usr_login_name LIKE ? OR data.usd_value LIKE ?)';
+            $whereParams[] = '%' . $query . '%';
+            $whereParams[] = '%' . $query . '%';
         }
 
-        $escapedLike = self::escapeLike($db, '%' . $query . '%');
         $sql = "
             SELECT DISTINCT
                 usr.usr_id,
                 usr.usr_login_name,
-                MAX(CASE WHEN fields.usf_name_intern = 'FIRST_NAME' THEN data.usd_value END) AS first_name,
-                MAX(CASE WHEN fields.usf_name_intern = 'LAST_NAME' THEN data.usd_value END) AS last_name,
-                MAX(CASE WHEN fields.usf_name_intern = 'EMAIL' THEN data.usd_value END) AS email
+                {$firstNameSelect},
+                {$lastNameSelect},
+                {$emailSelect}
             FROM {$usersTable} usr
             LEFT JOIN {$userDataTable} data
                 ON data.usd_usr_id = usr.usr_id
-            LEFT JOIN {$profileFieldsTable} fields
-                ON fields.usf_id = data.usd_usf_id
-            WHERE usr.usr_valid = 1
-                AND (
-                    usr.usr_login_name LIKE {$escapedLike}
-                    OR data.usd_value LIKE {$escapedLike}
-                )
+            WHERE " . implode(' AND ', $where) . "
             GROUP BY usr.usr_id, usr.usr_login_name
             ORDER BY last_name ASC, first_name ASC, usr.usr_login_name ASC
         ";
 
         try {
-            $rows = self::queryRows($db, $sql, $limit);
+            $rows = self::queryRowsPrepared($db, $sql, array_merge($selectParams, $whereParams), $limit);
         } catch (Throwable $exception) {
             return [
                 'users' => [],
@@ -375,32 +374,38 @@ final class AdmidioGateway
         return null;
     }
 
-    private static function escapeLike(object $db, string $value): string
+    private static function profileFieldIds(array $fieldNames): array
     {
-        if (method_exists($db, 'escapeString')) {
-            return "'" . $db->escapeString($value) . "'";
+        $profileFields = $GLOBALS['gProfileFields'] ?? null;
+        $fieldIds = [];
+
+        if (!is_object($profileFields) || !method_exists($profileFields, 'getProperty')) {
+            return $fieldIds;
         }
 
-        if (method_exists($db, 'escape')) {
-            return "'" . $db->escape($value) . "'";
+        foreach ($fieldNames as $fieldName) {
+            try {
+                $fieldId = (int) $profileFields->getProperty($fieldName, 'usf_id');
+
+                if ($fieldId > 0) {
+                    $fieldIds[$fieldName] = $fieldId;
+                }
+            } catch (Throwable) {
+            }
         }
 
-        return "'" . addslashes($value) . "'";
+        return $fieldIds;
     }
 
-    private static function queryRows(object $db, string $sql, int $limit): array
+    private static function profileFieldSelect(string $alias, ?int $fieldId, array &$params): string
     {
-        if (method_exists($db, 'queryPrepared')) {
-            $statement = $db->queryPrepared($sql . ' LIMIT ' . $limit);
-            return self::fetchRows($statement, $limit);
+        if ($fieldId === null || $fieldId <= 0) {
+            return 'NULL AS ' . $alias;
         }
 
-        if (method_exists($db, 'query')) {
-            $statement = $db->query($sql . ' LIMIT ' . $limit);
-            return self::fetchRows($statement, $limit);
-        }
+        $params[] = $fieldId;
 
-        throw new \RuntimeException('Unsupported Admidio database object.');
+        return 'MAX(CASE WHEN data.usd_usf_id = ? THEN data.usd_value END) AS ' . $alias;
     }
 
     private static function queryRowsPrepared(object $db, string $sql, array $params, int $limit): array
