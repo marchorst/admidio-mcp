@@ -93,8 +93,37 @@ final class McpServer
                             'minimum' => 1,
                             'maximum' => $this->config->maxSearchResults,
                         ],
+                        'offset' => [
+                            'type' => 'integer',
+                            'minimum' => 0,
+                            'description' => 'Number of matching users to skip for pagination.',
+                        ],
                     ],
                     'required' => ['query'],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
+                'name' => 'admidio_list_users',
+                'description' => 'List Admidio users page by page for exports or full member listings.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'limit' => [
+                            'type' => 'integer',
+                            'minimum' => 1,
+                            'maximum' => $this->config->maxSearchResults,
+                        ],
+                        'offset' => [
+                            'type' => 'integer',
+                            'minimum' => 0,
+                            'description' => 'Number of users to skip for pagination.',
+                        ],
+                        'include_inactive' => [
+                            'type' => 'boolean',
+                            'description' => 'Include inactive/invalid users. Defaults to false.',
+                        ],
+                    ],
                     'additionalProperties' => false,
                 ],
             ],
@@ -226,7 +255,14 @@ final class McpServer
             'admidio_search_users' => $this->toolResult(AdmidioGateway::searchUsers(
                 (string) ($arguments['query'] ?? ''),
                 isset($arguments['limit']) ? (int) $arguments['limit'] : $this->config->maxSearchResults,
-                $this->config->maxSearchResults
+                $this->config->maxSearchResults,
+                isset($arguments['offset']) ? (int) $arguments['offset'] : 0
+            )),
+            'admidio_list_users' => $this->toolResult(AdmidioGateway::listUsers(
+                isset($arguments['limit']) ? (int) $arguments['limit'] : $this->config->maxSearchResults,
+                $this->config->maxSearchResults,
+                isset($arguments['offset']) ? (int) $arguments['offset'] : 0,
+                isset($arguments['include_inactive']) && (bool) $arguments['include_inactive']
             )),
             'admidio_list_roles' => $this->toolResult(AdmidioGateway::listRoles(
                 (string) ($arguments['query'] ?? ''),

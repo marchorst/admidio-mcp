@@ -43,7 +43,7 @@ final class AdmidioGateway
         ];
     }
 
-    public static function searchUsers(string $query, int $limit, int $maxLimit): array
+    public static function searchUsers(string $query, int $limit, int $maxLimit, int $offset = 0): array
     {
         $query = trim($query);
 
@@ -57,48 +57,45 @@ final class AdmidioGateway
         }
 
         $limit = max(1, min($limit, $maxLimit));
+        $offset = max(0, $offset);
+        $fetchLimit = $limit + 1;
         $tablePrefix = self::detectTablePrefix();
         $usersTable = defined('TBL_USERS') ? TBL_USERS : $tablePrefix . 'users';
         $userDataTable = defined('TBL_USER_DATA') ? TBL_USER_DATA : $tablePrefix . 'user_data';
-        $profileFieldIds = self::profileFieldIds(['FIRST_NAME', 'LAST_NAME', 'EMAIL']);
-        $selectParams = [];
-        $firstNameSelect = self::profileFieldSelect('first_name', $profileFieldIds['FIRST_NAME'] ?? null, $selectParams);
-        $lastNameSelect = self::profileFieldSelect('last_name', $profileFieldIds['LAST_NAME'] ?? null, $selectParams);
-        $emailSelect = self::profileFieldSelect('email', $profileFieldIds['EMAIL'] ?? null, $selectParams);
+        [$profileSelects, $selectParams] = self::userProfileSelects();
 
         $where = ['usr.usr_valid = 1'];
         $whereParams = [];
 
-        if ($query !== '') {
-            if (mb_strlen($query) < 2) {
-                return [
-                    'users' => [],
-                    'error' => 'Query must contain at least two characters.',
-                ];
-            }
-
-            $where[] = '(usr.usr_login_name LIKE ? OR data.usd_value LIKE ?)';
-            $whereParams[] = '%' . $query . '%';
-            $whereParams[] = '%' . $query . '%';
+        if (mb_strlen($query) < 2) {
+            return [
+                'users' => [],
+                'error' => 'Query must contain at least two characters.',
+            ];
         }
+
+        $where[] = '(usr.usr_login_name LIKE ? OR data.usd_value LIKE ?)';
+        $whereParams[] = '%' . $query . '%';
+        $whereParams[] = '%' . $query . '%';
 
         $sql = "
             SELECT DISTINCT
                 usr.usr_id,
                 usr.usr_login_name,
-                {$firstNameSelect},
-                {$lastNameSelect},
-                {$emailSelect}
+                usr.usr_valid,
+                {$profileSelects['first_name']},
+                {$profileSelects['last_name']},
+                {$profileSelects['email']}
             FROM {$usersTable} usr
             LEFT JOIN {$userDataTable} data
                 ON data.usd_usr_id = usr.usr_id
             WHERE " . implode(' AND ', $where) . "
-            GROUP BY usr.usr_id, usr.usr_login_name
+            GROUP BY usr.usr_id, usr.usr_login_name, usr.usr_valid
             ORDER BY last_name ASC, first_name ASC, usr.usr_login_name ASC
         ";
 
         try {
-            $rows = self::queryRowsPrepared($db, $sql, array_merge($selectParams, $whereParams), $limit);
+            $rows = self::queryRowsPrepared($db, $sql, array_merge($selectParams, $whereParams), $fetchLimit, $offset);
         } catch (Throwable $exception) {
             return [
                 'users' => [],
@@ -106,14 +103,67 @@ final class AdmidioGateway
             ];
         }
 
+        $hasMore = count($rows) > $limit;
+        $rows = array_slice($rows, 0, $limit);
+
         return [
-            'users' => array_map(static fn (array $row): array => [
-                'id' => isset($row['usr_id']) ? (int) $row['usr_id'] : null,
-                'login_name' => $row['usr_login_name'] ?? null,
-                'first_name' => $row['first_name'] ?? null,
-                'last_name' => $row['last_name'] ?? null,
-                'email' => $row['email'] ?? null,
-            ], $rows),
+            'users' => array_map([self::class, 'mapUserRow'], $rows),
+            'pagination' => self::pagination($limit, $offset, count($rows), $hasMore),
+        ];
+    }
+
+    public static function listUsers(int $limit, int $maxLimit, int $offset = 0, bool $includeInactive = false): array
+    {
+        $db = $GLOBALS['gDb'] ?? null;
+
+        if (!is_object($db)) {
+            return [
+                'users' => [],
+                'error' => 'Admidio database object is not available.',
+            ];
+        }
+
+        $limit = max(1, min($limit, $maxLimit));
+        $offset = max(0, $offset);
+        $fetchLimit = $limit + 1;
+        $tablePrefix = self::detectTablePrefix();
+        $usersTable = defined('TBL_USERS') ? TBL_USERS : $tablePrefix . 'users';
+        $userDataTable = defined('TBL_USER_DATA') ? TBL_USER_DATA : $tablePrefix . 'user_data';
+        [$profileSelects, $selectParams] = self::userProfileSelects();
+        $where = $includeInactive ? ['1 = 1'] : ['usr.usr_valid = 1'];
+
+        $sql = "
+            SELECT DISTINCT
+                usr.usr_id,
+                usr.usr_login_name,
+                usr.usr_valid,
+                {$profileSelects['first_name']},
+                {$profileSelects['last_name']},
+                {$profileSelects['email']}
+            FROM {$usersTable} usr
+            LEFT JOIN {$userDataTable} data
+                ON data.usd_usr_id = usr.usr_id
+            WHERE " . implode(' AND ', $where) . "
+            GROUP BY usr.usr_id, usr.usr_login_name, usr.usr_valid
+            ORDER BY last_name ASC, first_name ASC, usr.usr_login_name ASC
+        ";
+
+        try {
+            $rows = self::queryRowsPrepared($db, $sql, $selectParams, $fetchLimit, $offset);
+        } catch (Throwable $exception) {
+            return [
+                'users' => [],
+                'error' => $exception->getMessage(),
+            ];
+        }
+
+        $hasMore = count($rows) > $limit;
+        $rows = array_slice($rows, 0, $limit);
+
+        return [
+            'users' => array_map([self::class, 'mapUserRow'], $rows),
+            'pagination' => self::pagination($limit, $offset, count($rows), $hasMore),
+            'include_inactive' => $includeInactive,
         ];
     }
 
@@ -408,9 +458,47 @@ final class AdmidioGateway
         return 'MAX(CASE WHEN data.usd_usf_id = ? THEN data.usd_value END) AS ' . $alias;
     }
 
-    private static function queryRowsPrepared(object $db, string $sql, array $params, int $limit): array
+    private static function userProfileSelects(): array
     {
-        $sqlWithLimit = $sql . ' LIMIT ' . $limit;
+        $profileFieldIds = self::profileFieldIds(['FIRST_NAME', 'LAST_NAME', 'EMAIL']);
+        $params = [];
+
+        return [
+            [
+                'first_name' => self::profileFieldSelect('first_name', $profileFieldIds['FIRST_NAME'] ?? null, $params),
+                'last_name' => self::profileFieldSelect('last_name', $profileFieldIds['LAST_NAME'] ?? null, $params),
+                'email' => self::profileFieldSelect('email', $profileFieldIds['EMAIL'] ?? null, $params),
+            ],
+            $params,
+        ];
+    }
+
+    private static function mapUserRow(array $row): array
+    {
+        return [
+            'id' => isset($row['usr_id']) ? (int) $row['usr_id'] : null,
+            'login_name' => $row['usr_login_name'] ?? null,
+            'valid' => isset($row['usr_valid']) ? (bool) $row['usr_valid'] : null,
+            'first_name' => $row['first_name'] ?? null,
+            'last_name' => $row['last_name'] ?? null,
+            'email' => $row['email'] ?? null,
+        ];
+    }
+
+    private static function pagination(int $limit, int $offset, int $count, bool $hasMore): array
+    {
+        return [
+            'limit' => $limit,
+            'offset' => $offset,
+            'count' => $count,
+            'has_more' => $hasMore,
+            'next_offset' => $hasMore ? $offset + $count : null,
+        ];
+    }
+
+    private static function queryRowsPrepared(object $db, string $sql, array $params, int $limit, int $offset = 0): array
+    {
+        $sqlWithLimit = $sql . ' LIMIT ' . $limit . ' OFFSET ' . max(0, $offset);
 
         if (method_exists($db, 'queryPrepared')) {
             $statement = $db->queryPrepared($sqlWithLimit, $params);

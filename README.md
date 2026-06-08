@@ -15,6 +15,7 @@ This repository is a fresh starting point. The plugin provides:
   - `admidio_health`
   - `admidio_current_user`
   - `admidio_search_users`
+  - `admidio_list_users`
   - `admidio_list_roles`
 - Mutating tools, only when `mutations_enabled = true` in `config.php`:
   - `admidio_create_user`
@@ -118,7 +119,27 @@ Example arguments for `admidio_assign_user_roles`:
 - If `auth_provider = "static"` is used, prefer `password_hash()` in `config.php`.
 - Mutating operations are disabled by default and must be explicitly enabled in `config.php`.
 - User and role changes use Admidio entity classes so Admidio validation and changelog logic can apply.
-- `admidio_search_users` limits result counts and returns only minimal fields.
+- `admidio_search_users` and `admidio_list_users` limit result counts and return only minimal fields.
+
+## User Listing and Search
+
+Use `admidio_search_users` for filtered lookup by login name, profile data,
+name, or email. The query must contain at least two characters. Use
+`admidio_list_users` for full member exports and walk through pages with
+`offset` and `limit`.
+
+Example arguments for `admidio_list_users`:
+
+```json
+{
+  "limit": 100,
+  "offset": 0,
+  "include_inactive": false
+}
+```
+
+Both tools return a `pagination` object with `limit`, `offset`, `count`,
+`has_more`, and `next_offset`.
 
 ## Development
 

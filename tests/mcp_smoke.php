@@ -34,8 +34,33 @@ if (!is_array($initialize) || !isset($initialize['result']['serverInfo']['name']
     exit(1);
 }
 
-if (!is_array($tools) || count($tools['result']['tools'] ?? []) !== 8) {
+if (!is_array($tools) || count($tools['result']['tools'] ?? []) !== 9) {
     fwrite(STDERR, "tools/list failed\n");
+    exit(1);
+}
+
+$toolNames = array_column($tools['result']['tools'], 'name');
+
+if (!in_array('admidio_list_users', $toolNames, true)) {
+    fwrite(STDERR, "admidio_list_users missing\n");
+    exit(1);
+}
+
+$listUsers = $server->handle([
+    'jsonrpc' => '2.0',
+    'id' => 3,
+    'method' => 'tools/call',
+    'params' => [
+        'name' => 'admidio_list_users',
+        'arguments' => [
+            'limit' => 10,
+            'offset' => 0,
+        ],
+    ],
+]);
+
+if (!is_array($listUsers) || ($listUsers['result']['isError'] ?? false) !== true) {
+    fwrite(STDERR, "admidio_list_users call failed\n");
     exit(1);
 }
 
