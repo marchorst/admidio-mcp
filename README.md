@@ -134,12 +134,29 @@ Example arguments for `admidio_list_users`:
 {
   "limit": 100,
   "offset": 0,
-  "include_inactive": false
+  "include_inactive": false,
+  "fields": ["FIRST_NAME", "LAST_NAME", "EMAIL"]
 }
 ```
 
 Both tools return a `pagination` object with `limit`, `offset`, `count`,
 `has_more`, and `next_offset`.
+
+The default returned profile fields can be configured in `config.php`:
+
+```php
+$plgMcpConfig = [
+    'user_fields' => [
+        'FIRST_NAME',
+        'LAST_NAME',
+        'EMAIL',
+        'phone' => 'PHONE',
+    ],
+];
+```
+
+Numeric keys generate lowercase JSON keys such as `FIRST_NAME` to `first_name`.
+String keys set the JSON output key explicitly, as in `phone`.
 
 ## Development
 

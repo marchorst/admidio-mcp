@@ -43,7 +43,7 @@ final class AdmidioGateway
         ];
     }
 
-    public static function searchUsers(string $query, int $limit, int $maxLimit, int $offset = 0): array
+    public static function searchUsers(string $query, int $limit, int $maxLimit, int $offset = 0, array $fields = []): array
     {
         $query = trim($query);
 
@@ -62,7 +62,7 @@ final class AdmidioGateway
         $tablePrefix = self::detectTablePrefix();
         $usersTable = defined('TBL_USERS') ? TBL_USERS : $tablePrefix . 'users';
         $userDataTable = defined('TBL_USER_DATA') ? TBL_USER_DATA : $tablePrefix . 'user_data';
-        [$profileSelects, $selectParams] = self::userProfileSelects();
+        [$profileSelects, $selectParams, $fieldAliases] = self::userProfileSelects($fields);
 
         $where = ['usr.usr_valid = 1'];
         $whereParams = [];
@@ -83,15 +83,13 @@ final class AdmidioGateway
                 usr.usr_id,
                 usr.usr_login_name,
                 usr.usr_valid,
-                {$profileSelects['first_name']},
-                {$profileSelects['last_name']},
-                {$profileSelects['email']}
+                " . implode(",\n                ", $profileSelects) . "
             FROM {$usersTable} usr
             LEFT JOIN {$userDataTable} data
                 ON data.usd_usr_id = usr.usr_id
             WHERE " . implode(' AND ', $where) . "
             GROUP BY usr.usr_id, usr.usr_login_name, usr.usr_valid
-            ORDER BY last_name ASC, first_name ASC, usr.usr_login_name ASC
+            ORDER BY usr.usr_id ASC
         ";
 
         try {
@@ -107,13 +105,19 @@ final class AdmidioGateway
         $rows = array_slice($rows, 0, $limit);
 
         return [
-            'users' => array_map([self::class, 'mapUserRow'], $rows),
+            'users' => array_map(static fn (array $row): array => self::mapUserRow($row, $fieldAliases), $rows),
             'pagination' => self::pagination($limit, $offset, count($rows), $hasMore),
+            'fields' => array_values($fieldAliases),
         ];
     }
 
-    public static function listUsers(int $limit, int $maxLimit, int $offset = 0, bool $includeInactive = false): array
-    {
+    public static function listUsers(
+        int $limit,
+        int $maxLimit,
+        int $offset = 0,
+        bool $includeInactive = false,
+        array $fields = []
+    ): array {
         $db = $GLOBALS['gDb'] ?? null;
 
         if (!is_object($db)) {
@@ -129,7 +133,7 @@ final class AdmidioGateway
         $tablePrefix = self::detectTablePrefix();
         $usersTable = defined('TBL_USERS') ? TBL_USERS : $tablePrefix . 'users';
         $userDataTable = defined('TBL_USER_DATA') ? TBL_USER_DATA : $tablePrefix . 'user_data';
-        [$profileSelects, $selectParams] = self::userProfileSelects();
+        [$profileSelects, $selectParams, $fieldAliases] = self::userProfileSelects($fields);
         $where = $includeInactive ? ['1 = 1'] : ['usr.usr_valid = 1'];
 
         $sql = "
@@ -137,15 +141,13 @@ final class AdmidioGateway
                 usr.usr_id,
                 usr.usr_login_name,
                 usr.usr_valid,
-                {$profileSelects['first_name']},
-                {$profileSelects['last_name']},
-                {$profileSelects['email']}
+                " . implode(",\n                ", $profileSelects) . "
             FROM {$usersTable} usr
             LEFT JOIN {$userDataTable} data
                 ON data.usd_usr_id = usr.usr_id
             WHERE " . implode(' AND ', $where) . "
             GROUP BY usr.usr_id, usr.usr_login_name, usr.usr_valid
-            ORDER BY last_name ASC, first_name ASC, usr.usr_login_name ASC
+            ORDER BY usr.usr_id ASC
         ";
 
         try {
@@ -161,9 +163,10 @@ final class AdmidioGateway
         $rows = array_slice($rows, 0, $limit);
 
         return [
-            'users' => array_map([self::class, 'mapUserRow'], $rows),
+            'users' => array_map(static fn (array $row): array => self::mapUserRow($row, $fieldAliases), $rows),
             'pagination' => self::pagination($limit, $offset, count($rows), $hasMore),
             'include_inactive' => $includeInactive,
+            'fields' => array_values($fieldAliases),
         ];
     }
 
@@ -458,31 +461,76 @@ final class AdmidioGateway
         return 'MAX(CASE WHEN data.usd_usf_id = ? THEN data.usd_value END) AS ' . $alias;
     }
 
-    private static function userProfileSelects(): array
+    private static function userProfileSelects(array $fields): array
     {
-        $profileFieldIds = self::profileFieldIds(['FIRST_NAME', 'LAST_NAME', 'EMAIL']);
+        $fields = self::normalizeUserFields($fields);
+        $profileFieldIds = self::profileFieldIds(array_keys($fields));
         $params = [];
+        $selects = [];
+        $aliases = [];
+        $index = 0;
 
-        return [
-            [
-                'first_name' => self::profileFieldSelect('first_name', $profileFieldIds['FIRST_NAME'] ?? null, $params),
-                'last_name' => self::profileFieldSelect('last_name', $profileFieldIds['LAST_NAME'] ?? null, $params),
-                'email' => self::profileFieldSelect('email', $profileFieldIds['EMAIL'] ?? null, $params),
-            ],
-            $params,
+        foreach ($fields as $fieldName => $outputAlias) {
+            $sqlAlias = 'field_' . $index;
+            $selects[] = self::profileFieldSelect($sqlAlias, $profileFieldIds[$fieldName] ?? null, $params);
+            $aliases[$sqlAlias] = $outputAlias;
+            $index++;
+        }
+
+        return [$selects, $params, $aliases];
+    }
+
+    private static function normalizeUserFields(array $fields): array
+    {
+        if ($fields === []) {
+            return [
+                'FIRST_NAME' => 'first_name',
+                'LAST_NAME' => 'last_name',
+                'EMAIL' => 'email',
+            ];
+        }
+
+        $normalized = [];
+
+        foreach ($fields as $fieldName => $outputAlias) {
+            $fieldName = strtoupper(trim((string) $fieldName));
+
+            if ($fieldName === '') {
+                continue;
+            }
+
+            $normalized[$fieldName] = self::normalizeOutputAlias((string) $outputAlias, $fieldName);
+        }
+
+        return $normalized !== [] ? $normalized : [
+            'FIRST_NAME' => 'first_name',
+            'LAST_NAME' => 'last_name',
+            'EMAIL' => 'email',
         ];
     }
 
-    private static function mapUserRow(array $row): array
+    private static function normalizeOutputAlias(string $outputAlias, string $fieldName): string
     {
-        return [
+        $outputAlias = strtolower(trim($outputAlias));
+        $outputAlias = preg_replace('/[^a-z0-9_]+/', '_', $outputAlias) ?? '';
+        $outputAlias = trim($outputAlias, '_');
+
+        return $outputAlias !== '' ? $outputAlias : strtolower($fieldName);
+    }
+
+    private static function mapUserRow(array $row, array $fieldAliases): array
+    {
+        $user = [
             'id' => isset($row['usr_id']) ? (int) $row['usr_id'] : null,
             'login_name' => $row['usr_login_name'] ?? null,
             'valid' => isset($row['usr_valid']) ? (bool) $row['usr_valid'] : null,
-            'first_name' => $row['first_name'] ?? null,
-            'last_name' => $row['last_name'] ?? null,
-            'email' => $row['email'] ?? null,
         ];
+
+        foreach ($fieldAliases as $sqlAlias => $outputAlias) {
+            $user[$outputAlias] = $row[$sqlAlias] ?? null;
+        }
+
+        return $user;
     }
 
     private static function pagination(int $limit, int $offset, int $count, bool $hasMore): array

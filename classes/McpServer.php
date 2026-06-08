@@ -98,6 +98,11 @@ final class McpServer
                             'minimum' => 0,
                             'description' => 'Number of matching users to skip for pagination.',
                         ],
+                        'fields' => [
+                            'type' => 'array',
+                            'description' => 'Optional Admidio profile field names to return, e.g. FIRST_NAME, LAST_NAME, EMAIL.',
+                            'items' => ['type' => 'string'],
+                        ],
                     ],
                     'required' => ['query'],
                     'additionalProperties' => false,
@@ -122,6 +127,11 @@ final class McpServer
                         'include_inactive' => [
                             'type' => 'boolean',
                             'description' => 'Include inactive/invalid users. Defaults to false.',
+                        ],
+                        'fields' => [
+                            'type' => 'array',
+                            'description' => 'Optional Admidio profile field names to return, e.g. FIRST_NAME, LAST_NAME, EMAIL.',
+                            'items' => ['type' => 'string'],
                         ],
                     ],
                     'additionalProperties' => false,
@@ -256,13 +266,15 @@ final class McpServer
                 (string) ($arguments['query'] ?? ''),
                 isset($arguments['limit']) ? (int) $arguments['limit'] : $this->config->maxSearchResults,
                 $this->config->maxSearchResults,
-                isset($arguments['offset']) ? (int) $arguments['offset'] : 0
+                isset($arguments['offset']) ? (int) $arguments['offset'] : 0,
+                $this->userFields($arguments)
             )),
             'admidio_list_users' => $this->toolResult(AdmidioGateway::listUsers(
                 isset($arguments['limit']) ? (int) $arguments['limit'] : $this->config->maxSearchResults,
                 $this->config->maxSearchResults,
                 isset($arguments['offset']) ? (int) $arguments['offset'] : 0,
-                isset($arguments['include_inactive']) && (bool) $arguments['include_inactive']
+                isset($arguments['include_inactive']) && (bool) $arguments['include_inactive'],
+                $this->userFields($arguments)
             )),
             'admidio_list_roles' => $this->toolResult(AdmidioGateway::listRoles(
                 (string) ($arguments['query'] ?? ''),
@@ -302,5 +314,33 @@ final class McpServer
             ],
             'isError' => true,
         ];
+    }
+
+    private function userFields(array $arguments): array
+    {
+        if (!isset($arguments['fields']) || !is_array($arguments['fields'])) {
+            return $this->config->userFields;
+        }
+
+        $fields = [];
+
+        foreach ($arguments['fields'] as $fieldName) {
+            $fieldName = trim((string) $fieldName);
+
+            if ($fieldName !== '') {
+                $fields[$fieldName] = $this->fieldAlias($fieldName);
+            }
+        }
+
+        return $fields !== [] ? $fields : $this->config->userFields;
+    }
+
+    private function fieldAlias(string $fieldName): string
+    {
+        $alias = strtolower(trim($fieldName));
+        $alias = preg_replace('/[^a-z0-9_]+/', '_', $alias) ?? '';
+        $alias = trim($alias, '_');
+
+        return $alias !== '' ? $alias : 'field';
     }
 }

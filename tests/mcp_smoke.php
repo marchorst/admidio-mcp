@@ -7,7 +7,18 @@ require_once __DIR__ . '/../classes/bootstrap.php';
 use AdmidioMcp\Config;
 use AdmidioMcp\McpServer;
 
-$server = new McpServer(new Config(true, true, 'admidio', 'codex', '', 'change-me', 20, [], dirname(__DIR__)));
+$server = new McpServer(new Config(
+    true,
+    true,
+    'admidio',
+    'codex',
+    '',
+    'change-me',
+    20,
+    ['FIRST_NAME' => 'first_name', 'LAST_NAME' => 'last_name', 'EMAIL' => 'email'],
+    [],
+    dirname(__DIR__)
+));
 
 $initialize = $server->handle([
     'jsonrpc' => '2.0',
@@ -43,6 +54,13 @@ $toolNames = array_column($tools['result']['tools'], 'name');
 
 if (!in_array('admidio_list_users', $toolNames, true)) {
     fwrite(STDERR, "admidio_list_users missing\n");
+    exit(1);
+}
+
+$listUsersTool = $tools['result']['tools'][array_search('admidio_list_users', $toolNames, true)] ?? null;
+
+if (!isset($listUsersTool['inputSchema']['properties']['fields'])) {
+    fwrite(STDERR, "admidio_list_users fields schema missing\n");
     exit(1);
 }
 

@@ -14,6 +14,7 @@ final class Config
         public readonly string $passwordHash,
         public readonly string $password,
         public readonly int $maxSearchResults,
+        public readonly array $userFields,
         public readonly array $allowedRoleIds,
         public readonly string $pluginDir
     ) {
@@ -29,6 +30,7 @@ final class Config
             'password_hash' => '',
             'password' => '',
             'max_search_results' => 20,
+            'user_fields' => ['FIRST_NAME', 'LAST_NAME', 'EMAIL'],
             'allowed_role_ids' => [],
         ];
 
@@ -51,8 +53,44 @@ final class Config
             (string) $config['password_hash'],
             (string) $config['password'],
             max(1, min(100, (int) $config['max_search_results'])),
+            self::normalizeUserFields((array) $config['user_fields']),
             array_values(array_filter(array_map('intval', (array) $config['allowed_role_ids']))),
             $pluginDir
         );
+    }
+
+    private static function normalizeUserFields(array $fields): array
+    {
+        $normalized = [];
+
+        foreach ($fields as $alias => $fieldName) {
+            $fieldName = trim((string) $fieldName);
+
+            if ($fieldName === '') {
+                continue;
+            }
+
+            $normalized[$fieldName] = is_string($alias) ? self::normalizeFieldAlias($alias) : self::defaultFieldAlias($fieldName);
+        }
+
+        return $normalized !== [] ? $normalized : [
+            'FIRST_NAME' => 'first_name',
+            'LAST_NAME' => 'last_name',
+            'EMAIL' => 'email',
+        ];
+    }
+
+    private static function defaultFieldAlias(string $fieldName): string
+    {
+        return strtolower($fieldName);
+    }
+
+    private static function normalizeFieldAlias(string $alias): string
+    {
+        $alias = strtolower(trim($alias));
+        $alias = preg_replace('/[^a-z0-9_]+/', '_', $alias) ?? '';
+        $alias = trim($alias, '_');
+
+        return $alias !== '' ? $alias : 'field';
     }
 }

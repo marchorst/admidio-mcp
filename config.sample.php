@@ -24,6 +24,16 @@ $plgMcpConfig = [
 
     'max_search_results' => 20,
 
+    // Profile fields returned by admidio_search_users and admidio_list_users.
+    // Numeric keys use a generated lowercase JSON key, e.g. FIRST_NAME -> first_name.
+    // String keys can be used to set an explicit JSON key.
+    'user_fields' => [
+        'FIRST_NAME',
+        'LAST_NAME',
+        'EMAIL',
+        // 'phone' => 'PHONE',
+    ],
+
     // Optional allow-list. Empty means all roles may be assigned/removed.
     'allowed_role_ids' => [],
 ];
