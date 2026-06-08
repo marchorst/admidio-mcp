@@ -79,6 +79,34 @@ final class McpServer
                 ],
             ],
             [
+                'name' => 'admidio_get_user',
+                'description' => 'Return one Admidio user by ID, login name, or email.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'user_id' => ['type' => 'integer'],
+                        'login_name' => ['type' => 'string'],
+                        'email' => ['type' => 'string'],
+                        'include_inactive' => ['type' => 'boolean'],
+                        'include_memberships' => ['type' => 'boolean'],
+                        'fields' => [
+                            'description' => 'Optional Admidio profile field names to return. Use "*" or "all" if allow_all_user_fields is enabled.',
+                            'oneOf' => [
+                                [
+                                    'type' => 'array',
+                                    'items' => ['type' => 'string'],
+                                ],
+                                [
+                                    'type' => 'string',
+                                    'enum' => ['*', 'all'],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
                 'name' => 'admidio_search_users',
                 'description' => 'Search active Admidio users by name or email and return minimal profile data.',
                 'inputSchema' => [
@@ -199,6 +227,87 @@ final class McpServer
                 ],
             ],
             [
+                'name' => 'admidio_get_role',
+                'description' => 'Return one Admidio role/group by ID or name.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'role_id' => ['type' => 'integer'],
+                        'role_name' => ['type' => 'string'],
+                        'include_memberships' => ['type' => 'boolean'],
+                        'limit' => [
+                            'type' => 'integer',
+                            'minimum' => 1,
+                            'maximum' => $this->config->maxSearchResults,
+                        ],
+                        'offset' => [
+                            'type' => 'integer',
+                            'minimum' => 0,
+                        ],
+                    ],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
+                'name' => 'admidio_list_user_memberships',
+                'description' => 'List Admidio role/group memberships for one user.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'user_id' => ['type' => 'integer'],
+                        'include_former_members' => ['type' => 'boolean'],
+                        'membership_active_on' => ['type' => 'string'],
+                    ],
+                    'required' => ['user_id'],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
+                'name' => 'admidio_list_role_memberships',
+                'description' => 'List Admidio memberships for one role/group.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'role_id' => ['type' => 'integer'],
+                        'role_name' => ['type' => 'string'],
+                        'limit' => [
+                            'type' => 'integer',
+                            'minimum' => 1,
+                            'maximum' => $this->config->maxSearchResults,
+                        ],
+                        'offset' => [
+                            'type' => 'integer',
+                            'minimum' => 0,
+                        ],
+                        'include_former_members' => ['type' => 'boolean'],
+                        'membership_active_on' => ['type' => 'string'],
+                        'fields' => [
+                            'description' => 'Optional user profile field names to include with each membership.',
+                            'oneOf' => [
+                                [
+                                    'type' => 'array',
+                                    'items' => ['type' => 'string'],
+                                ],
+                                [
+                                    'type' => 'string',
+                                    'enum' => ['*', 'all'],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
+                'name' => 'admidio_list_profile_fields',
+                'description' => 'List available Admidio profile fields and their metadata.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => (object) [],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
                 'name' => 'admidio_create_user',
                 'description' => 'Create an Admidio user, set profile fields, and optionally assign roles/groups.',
                 'inputSchema' => [
@@ -223,6 +332,7 @@ final class McpServer
                         'role_name' => ['type' => 'string'],
                         'membership_start' => ['type' => 'string'],
                         'membership_end' => ['type' => 'string'],
+                        'dry_run' => ['type' => 'boolean'],
                     ],
                     'required' => ['login_name', 'profile'],
                     'additionalProperties' => false,
@@ -242,6 +352,7 @@ final class McpServer
                             'type' => 'object',
                             'additionalProperties' => true,
                         ],
+                        'dry_run' => ['type' => 'boolean'],
                     ],
                     'required' => ['user_id'],
                     'additionalProperties' => false,
@@ -270,6 +381,7 @@ final class McpServer
                         'membership_end' => ['type' => 'string'],
                         'leader' => ['type' => 'boolean'],
                         'force_period' => ['type' => 'boolean'],
+                        'dry_run' => ['type' => 'boolean'],
                     ],
                     'required' => ['user_id'],
                     'additionalProperties' => false,
@@ -308,6 +420,7 @@ final class McpServer
                             'type' => 'boolean',
                             'description' => 'Force shortening existing membership periods when needed. Defaults to true.',
                         ],
+                        'dry_run' => ['type' => 'boolean'],
                     ],
                     'required' => ['user_id'],
                     'additionalProperties' => false,
@@ -330,6 +443,20 @@ final class McpServer
                             'items' => ['type' => 'string'],
                         ],
                         'role_name' => ['type' => 'string'],
+                        'dry_run' => ['type' => 'boolean'],
+                    ],
+                    'required' => ['user_id'],
+                    'additionalProperties' => false,
+                ],
+            ],
+            [
+                'name' => 'admidio_deactivate_user',
+                'description' => 'Deactivate an Admidio user by setting the user inactive.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'user_id' => ['type' => 'integer'],
+                        'dry_run' => ['type' => 'boolean'],
                     ],
                     'required' => ['user_id'],
                     'additionalProperties' => false,
@@ -351,6 +478,7 @@ final class McpServer
         return match ($params['name']) {
             'admidio_health' => $this->toolResult(AdmidioGateway::health()),
             'admidio_current_user' => $this->toolResult(AdmidioGateway::currentUser()),
+            'admidio_get_user' => $this->toolResult(AdmidioGateway::getUser($arguments, $this->userFields($arguments))),
             'admidio_search_users' => $this->toolResult(AdmidioGateway::searchUsers(
                 (string) ($arguments['query'] ?? ''),
                 isset($arguments['limit']) ? (int) $arguments['limit'] : $this->config->maxSearchResults,
@@ -375,11 +503,27 @@ final class McpServer
                 $this->config->maxSearchResults,
                 $this->config->allowedRoleIds
             )),
+            'admidio_get_role' => $this->toolResult(AdmidioGateway::getRole(
+                $arguments,
+                isset($arguments['limit']) ? (int) $arguments['limit'] : $this->config->maxSearchResults,
+                $this->config->maxSearchResults,
+                isset($arguments['offset']) ? (int) $arguments['offset'] : 0
+            )),
+            'admidio_list_user_memberships' => $this->toolResult(AdmidioGateway::listUserMemberships($arguments)),
+            'admidio_list_role_memberships' => $this->toolResult(AdmidioGateway::listRoleMemberships(
+                $arguments,
+                isset($arguments['limit']) ? (int) $arguments['limit'] : $this->config->maxSearchResults,
+                $this->config->maxSearchResults,
+                isset($arguments['offset']) ? (int) $arguments['offset'] : 0,
+                $this->userFields($arguments)
+            )),
+            'admidio_list_profile_fields' => $this->toolResult(AdmidioGateway::listProfileFields()),
             'admidio_create_user' => $this->toolResult(AdmidioGateway::createUser($arguments, $this->config)),
             'admidio_update_user' => $this->toolResult(AdmidioGateway::updateUser($arguments, $this->config)),
             'admidio_assign_user_roles' => $this->toolResult(AdmidioGateway::assignUserRoles($arguments, $this->config)),
             'admidio_update_user_memberships' => $this->toolResult(AdmidioGateway::updateUserMemberships($arguments, $this->config)),
             'admidio_remove_user_roles' => $this->toolResult(AdmidioGateway::removeUserRoles($arguments, $this->config)),
+            'admidio_deactivate_user' => $this->toolResult(AdmidioGateway::deactivateUser($arguments, $this->config)),
             default => $this->toolError('Unknown tool: ' . $params['name']),
         };
     }

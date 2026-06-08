@@ -46,7 +46,7 @@ if (!is_array($initialize) || !isset($initialize['result']['serverInfo']['name']
     exit(1);
 }
 
-if (!is_array($tools) || count($tools['result']['tools'] ?? []) !== 10) {
+if (!is_array($tools) || count($tools['result']['tools'] ?? []) !== 16) {
     fwrite(STDERR, "tools/list failed\n");
     exit(1);
 }
@@ -61,6 +61,20 @@ if (!in_array('admidio_list_users', $toolNames, true)) {
 if (!in_array('admidio_update_user_memberships', $toolNames, true)) {
     fwrite(STDERR, "admidio_update_user_memberships missing\n");
     exit(1);
+}
+
+foreach ([
+    'admidio_get_user',
+    'admidio_list_user_memberships',
+    'admidio_list_profile_fields',
+    'admidio_list_role_memberships',
+    'admidio_get_role',
+    'admidio_deactivate_user',
+] as $toolName) {
+    if (!in_array($toolName, $toolNames, true)) {
+        fwrite(STDERR, $toolName . " missing\n");
+        exit(1);
+    }
 }
 
 $listUsersTool = $tools['result']['tools'][array_search('admidio_list_users', $toolNames, true)] ?? null;

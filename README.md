@@ -14,15 +14,21 @@ This repository is a fresh starting point. The plugin provides:
 - Read-only tools:
   - `admidio_health`
   - `admidio_current_user`
+  - `admidio_get_user`
   - `admidio_search_users`
   - `admidio_list_users`
   - `admidio_list_roles`
+  - `admidio_get_role`
+  - `admidio_list_user_memberships`
+  - `admidio_list_role_memberships`
+  - `admidio_list_profile_fields`
 - Mutating tools, only when `mutations_enabled = true` in `config.php`:
   - `admidio_create_user`
   - `admidio_update_user`
   - `admidio_assign_user_roles`
   - `admidio_update_user_memberships`
   - `admidio_remove_user_roles`
+  - `admidio_deactivate_user`
 
 ## Admidio Installation
 
@@ -85,6 +91,7 @@ Mutating tools run as the authenticated Admidio user:
 - `admidio_create_user` requires user-management or registration administration rights.
 - `admidio_update_user` uses Admidio profile edit permissions.
 - `admidio_assign_user_roles` and `admidio_remove_user_roles` use Admidio role assignment permissions, including role leader rules.
+- Mutating tools support `dry_run = true` to validate and preview the planned change without saving it.
 
 Example arguments for `admidio_create_user`:
 
@@ -98,6 +105,18 @@ Example arguments for `admidio_create_user`:
     "EMAIL": "max@example.org"
   },
   "role_names": ["Members"]
+}
+```
+
+Dry-run example:
+
+```json
+{
+  "user_id": 123,
+  "role_name": "Members",
+  "membership_start": "2026-01-01",
+  "membership_end": "2026-12-31",
+  "dry_run": true
 }
 ```
 

@@ -43,6 +43,114 @@ final class AdmidioGateway
         ];
     }
 
+    public static function getUser(array $arguments, array $fields = []): array
+    {
+        $db = $GLOBALS['gDb'] ?? null;
+
+        if (!is_object($db)) {
+            return [
+                'user' => null,
+                'error' => 'Admidio database object is not available.',
+            ];
+        }
+
+        $tablePrefix = self::detectTablePrefix();
+        $usersTable = defined('TBL_USERS') ? TBL_USERS : $tablePrefix . 'users';
+        $userDataTable = defined('TBL_USER_DATA') ? TBL_USER_DATA : $tablePrefix . 'user_data';
+        [$profileSelects, $selectParams, $fieldAliases] = self::userProfileSelects($fields);
+        $where = [];
+        $whereParams = [];
+
+        if (isset($arguments['user_id']) && (int) $arguments['user_id'] > 0) {
+            $where[] = 'usr.usr_id = ?';
+            $whereParams[] = (int) $arguments['user_id'];
+        } elseif (isset($arguments['login_name']) && trim((string) $arguments['login_name']) !== '') {
+            $where[] = 'usr.usr_login_name = ?';
+            $whereParams[] = trim((string) $arguments['login_name']);
+        } elseif (isset($arguments['email']) && trim((string) $arguments['email']) !== '') {
+            $emailFieldIds = self::profileFieldIds(['EMAIL']);
+            $emailFieldId = $emailFieldIds['EMAIL'] ?? 0;
+
+            if ($emailFieldId <= 0) {
+                return [
+                    'user' => null,
+                    'error' => 'EMAIL profile field is not available.',
+                ];
+            }
+
+            $where[] = 'email_lookup.usd_usf_id = ?';
+            $where[] = 'email_lookup.usd_value = ?';
+            $whereParams[] = $emailFieldId;
+            $whereParams[] = trim((string) $arguments['email']);
+        } else {
+            return [
+                'user' => null,
+                'error' => 'One of user_id, login_name, or email is required.',
+            ];
+        }
+
+        if (!isset($arguments['include_inactive']) || !(bool) $arguments['include_inactive']) {
+            $where[] = 'usr.usr_valid = 1';
+        }
+
+        $emailJoin = isset($arguments['email']) ? '
+            LEFT JOIN ' . $userDataTable . ' email_lookup
+                ON email_lookup.usd_usr_id = usr.usr_id' : '';
+
+        $sql = "
+            SELECT DISTINCT
+                usr.usr_id,
+                usr.usr_login_name,
+                usr.usr_valid,
+                " . implode(",\n                ", $profileSelects) . "
+            FROM {$usersTable} usr
+            LEFT JOIN {$userDataTable} data
+                ON data.usd_usr_id = usr.usr_id
+            {$emailJoin}
+            WHERE " . implode(' AND ', $where) . "
+            GROUP BY usr.usr_id, usr.usr_login_name, usr.usr_valid
+            ORDER BY usr.usr_id ASC
+        ";
+
+        try {
+            $rows = self::queryRowsPrepared($db, $sql, array_merge($selectParams, $whereParams), 2);
+        } catch (Throwable $exception) {
+            return [
+                'user' => null,
+                'error' => $exception->getMessage(),
+            ];
+        }
+
+        if (count($rows) === 0) {
+            return [
+                'user' => null,
+                'error' => 'User not found.',
+            ];
+        }
+
+        if (count($rows) > 1) {
+            return [
+                'user' => null,
+                'error' => 'User lookup is ambiguous.',
+            ];
+        }
+
+        $user = self::mapUserRow($rows[0], $fieldAliases);
+
+        if (isset($arguments['include_memberships']) && (bool) $arguments['include_memberships']) {
+            $memberships = self::listUserMemberships([
+                'user_id' => $user['id'],
+                'include_former_members' => true,
+            ]);
+            $user['memberships'] = $memberships['memberships'] ?? [];
+        }
+
+        return [
+            'user' => $user,
+            'fields' => array_values($fieldAliases),
+        ];
+    }
+
     public static function searchUsers(string $query, int $limit, int $maxLimit, int $offset = 0, array $fields = []): array
     {
         $query = trim($query);
@@ -261,6 +369,178 @@ final class AdmidioGateway
         ];
     }
 
+    public static function getRole(array $arguments, int $limit, int $maxLimit, int $offset = 0): array
+    {
+        $roleIds = self::resolveOptionalRoleIds(self::argumentRoleIds($arguments), self::argumentRoleNames($arguments));
+
+        if ($roleIds === []) {
+            return [
+                'role' => null,
+                'error' => 'One of role_id or role_name is required.',
+            ];
+        }
+
+        if (count($roleIds) > 1) {
+            return [
+                'role' => null,
+                'error' => 'Role lookup must resolve to exactly one role.',
+            ];
+        }
+
+        $role = self::roleById($roleIds[0]);
+
+        if ($role === null) {
+            return [
+                'role' => null,
+                'error' => 'Role not found.',
+            ];
+        }
+
+        if (isset($arguments['include_memberships']) && (bool) $arguments['include_memberships']) {
+            $memberships = self::listRoleMemberships(
+                ['role_id' => $roleIds[0], 'include_former_members' => true],
+                $limit,
+                $maxLimit,
+                $offset
+            );
+            $role['memberships'] = $memberships['memberships'] ?? [];
+            $role['pagination'] = $memberships['pagination'] ?? null;
+        }
+
+        return [
+            'role' => $role,
+        ];
+    }
+
+    private static function roleById(int $roleId): ?array
+    {
+        $db = $GLOBALS['gDb'] ?? null;
+
+        if (!is_object($db)) {
+            return null;
+        }
+
+        $tablePrefix = defined('TBL_ROLES') ? '' : self::detectTablePrefix();
+        $rolesTable = defined('TBL_ROLES') ? TBL_ROLES : $tablePrefix . 'roles';
+        $categoriesTable = defined('TBL_CATEGORIES') ? TBL_CATEGORIES : $tablePrefix . 'categories';
+        $sql = '
+            SELECT rol.rol_id, rol.rol_uuid, rol.rol_name, rol.rol_description, rol.rol_administrator,
+                   cat.cat_id, cat.cat_name
+              FROM ' . $rolesTable . ' rol
+         LEFT JOIN ' . $categoriesTable . ' cat
+                ON cat.cat_id = rol.rol_cat_id
+             WHERE rol.rol_id = ?
+               AND rol.rol_valid = 1';
+
+        $rows = self::queryRowsPrepared($db, $sql, [$roleId], 1);
+
+        if ($rows === []) {
+            return null;
+        }
+
+        $row = $rows[0];
+
+        return [
+            'id' => isset($row['rol_id']) ? (int) $row['rol_id'] : null,
+            'uuid' => $row['rol_uuid'] ?? null,
+            'name' => $row['rol_name'] ?? null,
+            'description' => $row['rol_description'] ?? null,
+            'administrator' => isset($row['rol_administrator']) ? (bool) $row['rol_administrator'] : false,
+            'category' => [
+                'id' => isset($row['cat_id']) ? (int) $row['cat_id'] : null,
+                'name' => $row['cat_name'] ?? null,
+            ],
+        ];
+    }
+
+    public static function listUserMemberships(array $arguments): array
+    {
+        $userId = (int) ($arguments['user_id'] ?? 0);
+
+        if ($userId <= 0) {
+            return [
+                'memberships' => [],
+                'error' => 'user_id must be a positive integer.',
+            ];
+        }
+
+        return self::membershipRows(
+            ['mem.mem_usr_id = ?'],
+            [$userId],
+            isset($arguments['include_former_members']) && (bool) $arguments['include_former_members'],
+            (string) ($arguments['membership_active_on'] ?? ''),
+            1000,
+            0,
+            []
+        );
+    }
+
+    public static function listRoleMemberships(
+        array $arguments,
+        int $limit,
+        int $maxLimit,
+        int $offset = 0,
+        array $fields = []
+    ): array {
+        $roleIds = self::resolveOptionalRoleIds(self::argumentRoleIds($arguments), self::argumentRoleNames($arguments));
+
+        if ($roleIds === []) {
+            return [
+                'memberships' => [],
+                'error' => 'One of role_id or role_name is required.',
+            ];
+        }
+
+        $limit = max(1, min($limit, $maxLimit));
+        $offset = max(0, $offset);
+
+        return self::membershipRows(
+            ['mem.mem_rol_id IN (' . implode(', ', array_fill(0, count($roleIds), '?')) . ')'],
+            $roleIds,
+            isset($arguments['include_former_members']) && (bool) $arguments['include_former_members'],
+            (string) ($arguments['membership_active_on'] ?? ''),
+            $limit,
+            $offset,
+            $fields
+        );
+    }
+
+    public static function listProfileFields(): array
+    {
+        $profileFields = $GLOBALS['gProfileFields'] ?? null;
+        $fields = [];
+
+        if (is_object($profileFields) && method_exists($profileFields, 'getProfileFields')) {
+            try {
+                foreach ($profileFields->getProfileFields() as $fieldName => $field) {
+                    if (!is_object($field) || !method_exists($field, 'getValue')) {
+                        continue;
+                    }
+
+                    $fields[] = [
+                        'internal_name' => (string) $fieldName,
+                        'output_key' => self::normalizeOutputAlias('', (string) $fieldName),
+                        'name' => self::safeGetValue($field, 'usf_name'),
+                        'type' => self::safeGetValue($field, 'usf_type'),
+                        'category_id' => self::safeGetInt($field, 'usf_cat_id'),
+                        'sequence' => self::safeGetInt($field, 'usf_sequence'),
+                        'required' => self::safeGetBool($field, 'usf_required_input'),
+                        'system' => self::safeGetBool($field, 'usf_system'),
+                    ];
+                }
+            } catch (Throwable) {
+            }
+        }
+
+        if ($fields === []) {
+            $fields = self::profileFieldsFromDatabase();
+        }
+
+        return [
+            'fields' => $fields,
+        ];
+    }
+
     public static function createUser(array $arguments, Config $config): array
     {
         if ($error = self::mutationPreflight($config)) {
@@ -274,11 +554,34 @@ final class AdmidioGateway
         }
 
         try {
+            $dryRun = self::dryRun($arguments);
             self::assertCanCreateUsers();
             $user = self::newAdmidioUser();
             $user->setValue('usr_login_name', $loginName);
             $user->setValue('usr_valid', 1);
             self::applyProfileFields($user, $arguments['profile'] ?? []);
+
+            if ($dryRun) {
+                return [
+                    'created' => false,
+                    'dry_run' => true,
+                    'user' => self::userSummary($user),
+                    'roles' => self::hasRoleInput($arguments)
+                        ? self::assignRolesToUser(
+                            0,
+                            self::argumentRoleIds($arguments),
+                            self::argumentRoleNames($arguments),
+                            (string) ($arguments['membership_start'] ?? self::today()),
+                            (string) ($arguments['membership_end'] ?? self::dateMax()),
+                            null,
+                            $config,
+                            false,
+                            true
+                        )
+                        : [],
+                ];
+            }
+
             $user->save();
 
             if (isset($arguments['password']) && (string) $arguments['password'] !== '') {
@@ -327,6 +630,7 @@ final class AdmidioGateway
         }
 
         try {
+            $dryRun = self::dryRun($arguments);
             $user = self::newAdmidioUser($userId);
 
             if (isset($arguments['login_name'])) {
@@ -341,6 +645,14 @@ final class AdmidioGateway
 
             if (isset($arguments['password']) && (string) $arguments['password'] !== '') {
                 $user->setPassword((string) $arguments['password']);
+            }
+
+            if ($dryRun) {
+                return [
+                    'updated' => false,
+                    'dry_run' => true,
+                    'user' => self::userSummary($user),
+                ];
             }
 
             $user->save();
@@ -370,8 +682,10 @@ final class AdmidioGateway
         }
 
         try {
+            $dryRun = self::dryRun($arguments);
             return [
-                'assigned' => true,
+                'assigned' => !$dryRun,
+                'dry_run' => $dryRun,
                 'roles' => self::assignRolesToUser(
                     $userId,
                     self::argumentRoleIds($arguments),
@@ -380,7 +694,8 @@ final class AdmidioGateway
                     (string) ($arguments['membership_end'] ?? $arguments['end_date'] ?? self::dateMax()),
                     array_key_exists('leader', $arguments) ? (bool) $arguments['leader'] : null,
                     $config,
-                    isset($arguments['force_period']) && (bool) $arguments['force_period']
+                    isset($arguments['force_period']) && (bool) $arguments['force_period'],
+                    $dryRun
                 ),
             ];
         } catch (Throwable $exception) {
@@ -404,8 +719,10 @@ final class AdmidioGateway
         }
 
         try {
+            $dryRun = self::dryRun($arguments);
             return [
-                'updated' => true,
+                'updated' => !$dryRun,
+                'dry_run' => $dryRun,
                 'roles' => self::assignRolesToUser(
                     $userId,
                     self::argumentRoleIds($arguments),
@@ -414,7 +731,8 @@ final class AdmidioGateway
                     (string) ($arguments['membership_end'] ?? self::dateMax()),
                     array_key_exists('leader', $arguments) ? (bool) $arguments['leader'] : null,
                     $config,
-                    array_key_exists('force_period', $arguments) ? (bool) $arguments['force_period'] : true
+                    array_key_exists('force_period', $arguments) ? (bool) $arguments['force_period'] : true,
+                    $dryRun
                 ),
             ];
         } catch (Throwable $exception) {
@@ -438,6 +756,7 @@ final class AdmidioGateway
         }
 
         try {
+            $dryRun = self::dryRun($arguments);
             self::ensureRoleClass();
             self::ensureSessionStub();
             $db = self::admidioDb();
@@ -448,17 +767,56 @@ final class AdmidioGateway
                 $roleClass = self::roleClass();
                 $role = new $roleClass($db, $roleId);
                 self::assertCanAssignRole($role);
-                $role->stopMembership($userId);
+
+                if (!$dryRun) {
+                    $role->stopMembership($userId);
+                }
+
                 $removed[] = $roleId;
             }
 
             return [
-                'removed' => true,
+                'removed' => !$dryRun,
+                'dry_run' => $dryRun,
                 'role_ids' => $removed,
             ];
         } catch (Throwable $exception) {
             return [
                 'removed' => false,
+                'error' => $exception->getMessage(),
+            ];
+        }
+    }
+
+    public static function deactivateUser(array $arguments, Config $config): array
+    {
+        if ($error = self::mutationPreflight($config)) {
+            return $error;
+        }
+
+        $userId = (int) ($arguments['user_id'] ?? 0);
+
+        if ($userId <= 0) {
+            return ['deactivated' => false, 'error' => 'user_id must be a positive integer.'];
+        }
+
+        try {
+            $dryRun = self::dryRun($arguments);
+            $user = self::newAdmidioUser($userId);
+            $user->setValue('usr_valid', 0);
+
+            if (!$dryRun) {
+                $user->save();
+            }
+
+            return [
+                'deactivated' => !$dryRun,
+                'dry_run' => $dryRun,
+                'user' => self::userSummary($user),
+            ];
+        } catch (Throwable $exception) {
+            return [
+                'deactivated' => false,
                 'error' => $exception->getMessage(),
             ];
         }
@@ -524,6 +882,117 @@ final class AdmidioGateway
         $params[] = $fieldId;
 
         return 'MAX(CASE WHEN data.usd_usf_id = ? THEN data.usd_value END) AS ' . $alias;
+    }
+
+    private static function membershipRows(
+        array $where,
+        array $whereParams,
+        bool $includeFormerMembers,
+        string $membershipActiveOn,
+        int $limit,
+        int $offset,
+        array $fields
+    ): array {
+        $db = $GLOBALS['gDb'] ?? null;
+
+        if (!is_object($db)) {
+            return [
+                'memberships' => [],
+                'error' => 'Admidio database object is not available.',
+            ];
+        }
+
+        if (!$includeFormerMembers) {
+            $membershipActiveOn = $membershipActiveOn !== '' ? $membershipActiveOn : self::today();
+            self::assertDate($membershipActiveOn, 'membership_active_on');
+            $where[] = 'mem.mem_begin <= ?';
+            $where[] = 'mem.mem_end >= ?';
+            $whereParams[] = $membershipActiveOn;
+            $whereParams[] = $membershipActiveOn;
+        }
+
+        $fetchLimit = $limit + 1;
+        $tablePrefix = self::detectTablePrefix();
+        $membersTable = defined('TBL_MEMBERS') ? TBL_MEMBERS : $tablePrefix . 'members';
+        $rolesTable = defined('TBL_ROLES') ? TBL_ROLES : $tablePrefix . 'roles';
+        $usersTable = defined('TBL_USERS') ? TBL_USERS : $tablePrefix . 'users';
+        $userDataTable = defined('TBL_USER_DATA') ? TBL_USER_DATA : $tablePrefix . 'user_data';
+        [$profileSelects, $selectParams, $fieldAliases] = self::userProfileSelects($fields);
+
+        $sql = "
+            SELECT
+                mem.mem_id,
+                mem.mem_uuid,
+                mem.mem_rol_id,
+                mem.mem_usr_id,
+                mem.mem_begin,
+                mem.mem_end,
+                mem.mem_leader,
+                mem.mem_approved,
+                mem.mem_comment,
+                mem.mem_count_guests,
+                rol.rol_name,
+                rol.rol_uuid,
+                usr.usr_login_name,
+                usr.usr_valid,
+                " . implode(",\n                ", $profileSelects) . "
+            FROM {$membersTable} mem
+            INNER JOIN {$rolesTable} rol
+                ON rol.rol_id = mem.mem_rol_id
+            INNER JOIN {$usersTable} usr
+                ON usr.usr_id = mem.mem_usr_id
+            LEFT JOIN {$userDataTable} data
+                ON data.usd_usr_id = usr.usr_id
+            WHERE " . implode(' AND ', $where) . "
+            GROUP BY mem.mem_id, mem.mem_uuid, mem.mem_rol_id, mem.mem_usr_id, mem.mem_begin, mem.mem_end,
+                     mem.mem_leader, mem.mem_approved, mem.mem_comment, mem.mem_count_guests,
+                     rol.rol_name, rol.rol_uuid, usr.usr_login_name, usr.usr_valid
+            ORDER BY mem.mem_begin DESC, mem.mem_id DESC
+        ";
+
+        try {
+            $rows = self::queryRowsPrepared($db, $sql, array_merge($selectParams, $whereParams), $fetchLimit, $offset);
+        } catch (Throwable $exception) {
+            return [
+                'memberships' => [],
+                'error' => $exception->getMessage(),
+            ];
+        }
+
+        $hasMore = count($rows) > $limit;
+        $rows = array_slice($rows, 0, $limit);
+
+        return [
+            'memberships' => array_map(static fn (array $row): array => self::mapMembershipRow($row, $fieldAliases), $rows),
+            'pagination' => self::pagination($limit, $offset, count($rows), $hasMore),
+            'include_former_members' => $includeFormerMembers,
+            'membership_active_on' => $includeFormerMembers ? null : $membershipActiveOn,
+            'fields' => array_values($fieldAliases),
+        ];
+    }
+
+    private static function mapMembershipRow(array $row, array $fieldAliases): array
+    {
+        return [
+            'id' => isset($row['mem_id']) ? (int) $row['mem_id'] : null,
+            'uuid' => $row['mem_uuid'] ?? null,
+            'membership_start' => $row['mem_begin'] ?? null,
+            'membership_end' => $row['mem_end'] ?? null,
+            'leader' => isset($row['mem_leader']) ? (bool) $row['mem_leader'] : false,
+            'approved' => isset($row['mem_approved']) ? (int) $row['mem_approved'] : null,
+            'comment' => $row['mem_comment'] ?? null,
+            'guest_count' => isset($row['mem_count_guests']) ? (int) $row['mem_count_guests'] : null,
+            'role' => [
+                'id' => isset($row['mem_rol_id']) ? (int) $row['mem_rol_id'] : null,
+                'uuid' => $row['rol_uuid'] ?? null,
+                'name' => $row['rol_name'] ?? null,
+            ],
+            'user' => self::mapUserRow([
+                'usr_id' => $row['mem_usr_id'] ?? null,
+                'usr_login_name' => $row['usr_login_name'] ?? null,
+                'usr_valid' => $row['usr_valid'] ?? null,
+            ] + $row, $fieldAliases),
+        ];
     }
 
     private static function userProfileSelects(array $fields): array
@@ -644,6 +1113,70 @@ final class AdmidioGateway
         }
 
         return $fields;
+    }
+
+    private static function profileFieldsFromDatabase(): array
+    {
+        $db = $GLOBALS['gDb'] ?? null;
+
+        if (!is_object($db)) {
+            return [];
+        }
+
+        $tablePrefix = defined('TBL_USER_FIELDS') ? '' : self::detectTablePrefix();
+        $userFieldsTable = defined('TBL_USER_FIELDS') ? TBL_USER_FIELDS : $tablePrefix . 'user_fields';
+        $sql = '
+            SELECT usf_id, usf_name_intern, usf_name, usf_type, usf_cat_id, usf_sequence,
+                   usf_required_input, usf_system
+              FROM ' . $userFieldsTable . '
+             WHERE usf_name_intern <> \'\'
+          ORDER BY usf_sequence ASC, usf_name_intern ASC';
+
+        try {
+            $rows = self::queryRowsPrepared($db, $sql, [], 1000);
+        } catch (Throwable) {
+            return [];
+        }
+
+        return array_map(static fn (array $row): array => [
+            'id' => isset($row['usf_id']) ? (int) $row['usf_id'] : null,
+            'internal_name' => $row['usf_name_intern'] ?? null,
+            'output_key' => self::normalizeOutputAlias('', (string) ($row['usf_name_intern'] ?? '')),
+            'name' => $row['usf_name'] ?? null,
+            'type' => $row['usf_type'] ?? null,
+            'category_id' => isset($row['usf_cat_id']) ? (int) $row['usf_cat_id'] : null,
+            'sequence' => isset($row['usf_sequence']) ? (int) $row['usf_sequence'] : null,
+            'required' => isset($row['usf_required_input']) ? (bool) $row['usf_required_input'] : null,
+            'system' => isset($row['usf_system']) ? (bool) $row['usf_system'] : null,
+        ], $rows);
+    }
+
+    private static function safeGetValue(object $object, string $key): mixed
+    {
+        if (!method_exists($object, 'getValue')) {
+            return null;
+        }
+
+        try {
+            $value = $object->getValue($key);
+            return $value === '' ? null : $value;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private static function safeGetInt(object $object, string $key): ?int
+    {
+        $value = self::safeGetValue($object, $key);
+
+        return $value === null ? null : (int) $value;
+    }
+
+    private static function safeGetBool(object $object, string $key): ?bool
+    {
+        $value = self::safeGetValue($object, $key);
+
+        return $value === null ? null : (bool) $value;
     }
 
     private static function normalizeOutputAlias(string $outputAlias, string $fieldName): string
@@ -828,7 +1361,8 @@ final class AdmidioGateway
         string $endDate,
         ?bool $leader,
         Config $config,
-        bool $forcePeriod = false
+        bool $forcePeriod = false,
+        bool $dryRun = false
     ): array {
         self::ensureRoleClass();
         self::ensureSessionStub();
@@ -848,13 +1382,18 @@ final class AdmidioGateway
             $roleClass = self::roleClass();
             $role = new $roleClass($db, $roleId);
             self::assertCanAssignRole($role);
-            $role->setMembership($userId, $startDate, $endDate, $leader, $forcePeriod);
+
+            if (!$dryRun) {
+                $role->setMembership($userId, $startDate, $endDate, $leader, $forcePeriod);
+            }
+
             $assigned[] = [
                 'role_id' => $roleId,
                 'start_date' => $startDate,
                 'end_date' => $endDate,
                 'leader' => $leader,
                 'force_period' => $forcePeriod,
+                'dry_run' => $dryRun,
             ];
         }
 
@@ -929,6 +1468,11 @@ final class AdmidioGateway
             || !empty($arguments['role_ids'])
             || !empty($arguments['role_name'])
             || !empty($arguments['role_names']);
+    }
+
+    private static function dryRun(array $arguments): bool
+    {
+        return isset($arguments['dry_run']) && (bool) $arguments['dry_run'];
     }
 
     private static function argumentRoleIds(array $arguments): array
